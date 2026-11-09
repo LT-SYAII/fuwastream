@@ -40,6 +40,16 @@ interface MangaDexApi {
         @Query("includes[]") includes: List<String>,
     ): FeedDto
 
+    /** Newest chapters across all manga, each with its manga included; feeds the release notifications. */
+    @GET("chapter")
+    suspend fun latestChapters(
+        @Query("limit") limit: Int,
+        @Query("order[publishAt]") byPublishAt: String = "desc",
+        @Query("translatedLanguage[]") langs: List<String>,
+        @Query("contentRating[]") ratings: List<String>,
+        @Query("includes[]") includes: List<String> = listOf("manga"),
+    ): FeedDto
+
     @GET("at-home/server/{chapterId}")
     suspend fun atHome(@Path("chapterId") chapterId: String): AtHomeDto
 

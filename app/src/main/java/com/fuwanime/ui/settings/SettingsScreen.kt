@@ -62,6 +62,8 @@ import androidx.compose.material.icons.rounded.PictureInPictureAlt
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.LiveTv
+import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material3.AlertDialog
@@ -294,6 +296,26 @@ fun SettingsRoute(onBack: () -> Unit, onOpenLegal: (String) -> Unit) {
                     s.notifyNewEpisodes,
                 ) {
                     vm.update { setNotifyNewEpisodes(it) }
+                }
+            }
+            item {
+                SwitchRow(
+                    Icons.Rounded.LiveTv,
+                    stringResource(R.string.mine_notify_releases),
+                    stringResource(R.string.mine_notify_releases_desc),
+                    s.notifyOngoingAnime,
+                ) {
+                    vm.update { setNotifyOngoingAnime(it) }
+                }
+            }
+            item {
+                SwitchRow(
+                    Icons.AutoMirrored.Rounded.MenuBook,
+                    stringResource(R.string.mine_notify_chapters),
+                    stringResource(R.string.mine_notify_chapters_desc),
+                    s.notifyNewChapters,
+                ) {
+                    vm.update { setNotifyNewChapters(it) }
                 }
             }
 

@@ -14,6 +14,7 @@ import org.junit.Test
 class LaunchTargetTest {
     @Test fun resumeWins() = assertEquals(LaunchTarget.Resume("e1"), parseLaunchTarget("a1", "schedule", "e1"))
     @Test fun animeWhenNoResume() = assertEquals(LaunchTarget.Anime("a1"), parseLaunchTarget("a1", "schedule", null))
+    @Test fun mangaWhenNoAnime() = assertEquals(LaunchTarget.Manga("m1"), parseLaunchTarget(null, null, null, "m1"))
     @Test fun tabSearch() = assertEquals(LaunchTarget.Search, parseLaunchTarget(null, "explore_search", null))
     @Test fun tabSchedule() = assertEquals(LaunchTarget.Schedule, parseLaunchTarget(null, "schedule", null))
     @Test fun unknownTabNull() = assertNull(parseLaunchTarget(null, "settings", null))

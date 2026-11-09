@@ -99,6 +99,10 @@
     <string name="mine_seconds_short">%1$ds</string>
     <string name="mine_notify_new">New episode notifications</string>
     <string name="mine_notify_new_desc">Checks airing favorites every 6 hours</string>
+    <string name="mine_notify_releases">New anime release notifications</string>
+    <string name="mine_notify_releases_desc">New episodes from every airing anime, not just favorites</string>
+    <string name="mine_notify_chapters">New manga chapter notifications</string>
+    <string name="mine_notify_chapters_desc">New chapters from ongoing manga (MangaDex, app language)</string>
     <string name="mine_download_quality">Download quality</string>
     <string name="mine_wifi_only">Download on Wi-Fi only</string>
     <string name="mine_wifi_only_desc">Saves data; downloads wait until you are on Wi-Fi</string>

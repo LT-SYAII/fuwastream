@@ -38,6 +38,10 @@ data class AppSettings(
     val downloadWifiOnly: Boolean = false,
     /** Periodic background check for new episodes of favorited, ongoing anime. */
     val notifyNewEpisodes: Boolean = true,
+    /** Release notifications for any ongoing anime, not only favourites. */
+    val notifyOngoingAnime: Boolean = true,
+    /** Release notifications for any ongoing manga (MangaDex, app language). */
+    val notifyNewChapters: Boolean = true,
     /** Skip a marked opening without waiting for a tap. */
     val autoSkipOp: Boolean = false,
     /** Generic "+85 dtk" jump for anime whose opening is not marked yet. */
@@ -62,6 +66,8 @@ internal object Keys {
     val downloadQuality = intPreferencesKey("download_quality")
     val downloadWifiOnly = booleanPreferencesKey("download_wifi_only")
     val notifyNewEpisodes = booleanPreferencesKey("notify_new_episodes")
+    val notifyOngoingAnime = booleanPreferencesKey("notify_ongoing_anime")
+    val notifyNewChapters = booleanPreferencesKey("notify_new_chapters")
     val autoSkipOp = booleanPreferencesKey("auto_skip_op")
     val jumpAheadButton = booleanPreferencesKey("jump_ahead_button")
     val mobileDataQuality = intPreferencesKey("mobile_data_quality")
@@ -170,6 +176,8 @@ class SettingsStore(private val context: Context) {
     suspend fun setDownloadQuality(height: Int) = context.dataStore.edit { it[Keys.downloadQuality] = height }
     suspend fun setDownloadWifiOnly(enabled: Boolean) = context.dataStore.edit { it[Keys.downloadWifiOnly] = enabled }
     suspend fun setNotifyNewEpisodes(enabled: Boolean) = context.dataStore.edit { it[Keys.notifyNewEpisodes] = enabled }
+    suspend fun setNotifyOngoingAnime(enabled: Boolean) = context.dataStore.edit { it[Keys.notifyOngoingAnime] = enabled }
+    suspend fun setNotifyNewChapters(enabled: Boolean) = context.dataStore.edit { it[Keys.notifyNewChapters] = enabled }
     suspend fun setAutoSkipOp(enabled: Boolean) = context.dataStore.edit { it[Keys.autoSkipOp] = enabled }
     suspend fun setJumpAheadButton(enabled: Boolean) = context.dataStore.edit { it[Keys.jumpAheadButton] = enabled }
     suspend fun setMobileDataQuality(height: Int) = context.dataStore.edit { it[Keys.mobileDataQuality] = height }
@@ -207,6 +215,22 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setNotifyBaseline(animeId: String, episode: Double) {
         context.dataStore.edit { it[doublePreferencesKey("notify_baseline_$animeId")] = episode }
+    }
+
+    /** Newest episode already notified from the global ongoing-anime feed (per-anime key). */
+    suspend fun releaseBaseline(animeId: String): Double? =
+        context.dataStore.data.map { it[doublePreferencesKey("notify_release_$animeId")] }.firstOrNull()
+
+    suspend fun setReleaseBaseline(animeId: String, episode: Double) {
+        context.dataStore.edit { it[doublePreferencesKey("notify_release_$animeId")] = episode }
+    }
+
+    /** Newest chapter already notified from the global ongoing-manga feed (per-manga key). */
+    suspend fun mangaBaseline(mangaId: String): Double? =
+        context.dataStore.data.map { it[doublePreferencesKey("notify_manga_$mangaId")] }.firstOrNull()
+
+    suspend fun setMangaBaseline(mangaId: String, chapter: Double) {
+        context.dataStore.edit { it[doublePreferencesKey("notify_manga_$mangaId")] = chapter }
     }
 
     /** Koleksi → Favorit order; unknown stored names fall back to [FavoriteSort.ADDED]. */
@@ -253,6 +277,8 @@ internal fun Preferences.toSettings(): AppSettings {
         downloadQuality = this[Keys.downloadQuality] ?: d.downloadQuality,
         downloadWifiOnly = this[Keys.downloadWifiOnly] ?: d.downloadWifiOnly,
         notifyNewEpisodes = this[Keys.notifyNewEpisodes] ?: d.notifyNewEpisodes,
+        notifyOngoingAnime = this[Keys.notifyOngoingAnime] ?: d.notifyOngoingAnime,
+        notifyNewChapters = this[Keys.notifyNewChapters] ?: d.notifyNewChapters,
         autoSkipOp = this[Keys.autoSkipOp] ?: d.autoSkipOp,
         jumpAheadButton = this[Keys.jumpAheadButton] ?: d.jumpAheadButton,
         mobileDataQuality = this[Keys.mobileDataQuality] ?: d.mobileDataQuality,

@@ -62,6 +62,8 @@ class BackupCodecTest {
         assertFalse(isBackedUpSetting("update_last_check_ms"))
         assertFalse(isBackedUpSetting("update_dismissed_tag"))
         assertFalse(isBackedUpSetting("notify_baseline_9"))
+        assertFalse(isBackedUpSetting("notify_release_9"))
+        assertFalse(isBackedUpSetting("notify_manga_9"))
         assertFalse(isBackedUpSetting("backup_tree_uri"))
     }
 
@@ -84,6 +86,8 @@ class BackupCodecTest {
         assertFalse(settingTypeAccepted("auto_pip", "int"))
         assertTrue(settingTypeAccepted("op_start_42", "long"))
         assertFalse(settingTypeAccepted("op_end_42", "string"))
+        assertTrue(settingTypeAccepted("notify_ongoing_anime", "boolean"))
+        assertFalse(settingTypeAccepted("notify_new_chapters", "int"))
         assertTrue(settingTypeAccepted("some_future_key", "string"))
         assertFalse(settingTypeAccepted("theme_mode", "blob"))
     }

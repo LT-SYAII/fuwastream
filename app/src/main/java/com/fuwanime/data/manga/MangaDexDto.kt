@@ -42,6 +42,10 @@ data class RelationshipDto(
 data class RelationshipAttributesDto(
     @Json(name = "fileName") val fileName: String? = null,
     @Json(name = "name") val name: String? = null,
+    /** Set when a chapter includes its manga (`includes[]=manga`): the manga title. */
+    @Json(name = "title") val title: Any? = null,
+    /** Set when a chapter includes its manga: the manga status ("ongoing", ...). */
+    @Json(name = "status") val status: String? = null,
 )
 
 @JsonClass(generateAdapter = true)

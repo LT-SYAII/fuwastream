@@ -138,6 +138,14 @@ class MangaRepository(
         return all
     }
 
+    /** Newest app-language chapter per recently updated ongoing manga, newest first; feeds the release notifications. */
+    suspend fun latestOngoingChapters(limit: Int = 40): List<MangaRelease> {
+        val feed = call {
+            api.latestChapters(limit = limit, langs = chapterLanguages(), ratings = ratings(), includes = listOf("manga"))
+        }
+        return latestPerManga(feed.data.mapNotNull { it.mangaRelease() })
+    }
+
     suspend fun pages(chapterId: String, dataSaver: Boolean, forceRefresh: Boolean = false): List<String> {
         if (isShinigamiId(chapterId)) return shinigami?.pages(chapterId).orEmpty()
         if (isKomikuId(chapterId)) return komiku?.pages(chapterId).orEmpty()
@@ -156,6 +164,10 @@ class MangaRepository(
     }
 
     private suspend fun ratings() = if (mature()) RATINGS_MATURE else RATINGS
+
+    /** The chapters the release notifications watch: the app language (English for every other locale). */
+    private fun chapterLanguages(): List<String> =
+        if (appLanguage().let { it == "id" || it == "in" }) listOf("id") else listOf("en")
 
     private fun notFound() = UiTextException(UiText(R.string.manga_error_not_found))
 

@@ -86,56 +86,53 @@ class EpisodeNotifier(private val context: Context) {
     private val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     /** False without notification permission; otherwise makes sure the channel exists. */
-    private fun ready(): Boolean {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) return false
-        if (Build.VERSION.SDK_INT >= 26) {
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    res.getString(R.string.system_channel_new_episodes_name),
-                    NotificationManager.IMPORTANCE_DEFAULT,
-                ).apply { description = res.getString(R.string.system_channel_new_episodes_desc) },
-            )
-        }
-        return true
-    }
+    private fun ready(): Boolean = ensureChannel(
+        context, manager, CHANNEL_ID,
+        res.getString(R.string.system_channel_new_episodes_name),
+        res.getString(R.string.system_channel_new_episodes_desc),
+    )
 
-    suspend fun notifyNewEpisode(favorite: FavoriteEntity, episode: Episode) {
+    suspend fun notifyNewEpisode(favorite: FavoriteEntity, episode: Episode) = notifyAnime(
+        animeId = favorite.animeId,
+        title = favorite.title,
+        poster = favorite.poster,
+        cover = favorite.cover,
+        text = res.getString(R.string.system_new_episode_text, episode.number),
+    )
+
+    /** Posts a "new episode" notification for any anime (favourites and the global release feed). */
+    suspend fun notifyAnime(animeId: String, title: String, poster: String, cover: String, text: String) {
         if (!ready()) return
 
         val contentIntent = PendingIntent.getActivity(
             context,
-            favorite.animeId.hashCode(),
+            animeId.hashCode(),
             Intent(context, MainActivity::class.java).apply {
-                putExtra(MainActivity.EXTRA_OPEN_ANIME_ID, favorite.animeId)
+                putExtra(MainActivity.EXTRA_OPEN_ANIME_ID, animeId)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
         // Artwork is a bonus: when it can't load the notification stays text-only.
-        val poster = loadBitmap(context, favorite.poster, 256)
-        val cover = loadBitmap(context, favorite.cover.ifBlank { favorite.poster }, 1024)
-        val text = res.getString(R.string.system_new_episode_text, episode.number)
+        val posterBitmap = loadBitmap(context, poster, 256)
+        val coverBitmap = loadBitmap(context, cover.ifBlank { poster }, 1024)
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(favorite.title)
+            .setContentTitle(title)
             .setContentText(text)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
             .setGroup(GROUP_KEY)
             .apply {
-                if (poster != null) setLargeIcon(poster)
-                if (cover != null) {
-                    setStyle(NotificationCompat.BigPictureStyle().bigPicture(cover).bigLargeIcon(null as Bitmap?).setSummaryText(text))
+                if (posterBitmap != null) setLargeIcon(posterBitmap)
+                if (coverBitmap != null) {
+                    setStyle(NotificationCompat.BigPictureStyle().bigPicture(coverBitmap).bigLargeIcon(null as Bitmap?).setSummaryText(text))
                 }
             }
             .build()
-        manager.notify(favorite.animeId.hashCode(), notification)
+        manager.notify(animeId.hashCode(), notification)
     }
 
     /** Collapses several "new episode" notifications under one "N new episodes" header. */
@@ -164,3 +161,30 @@ class EpisodeNotifier(private val context: Context) {
 /** Title of the grouped "new episode" summary. */
 fun groupSummaryTitle(res: Resources, count: Int): String =
     res.getQuantityString(R.plurals.system_new_episodes_summary, count, count)
+
+/** Title of the grouped "new chapter" summary. */
+fun chapterSummaryTitle(res: Resources, count: Int): String =
+    res.getQuantityString(R.plurals.system_new_chapters_summary, count, count)
+
+/**
+ * False without the notification permission; otherwise makes sure a channel with [channelId] exists.
+ * Shared by every notifier so the permission check and channel setup live in one place.
+ */
+fun ensureChannel(
+    context: Context,
+    manager: NotificationManager,
+    channelId: String,
+    name: String,
+    description: String,
+): Boolean {
+    if (Build.VERSION.SDK_INT >= 33 &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+        PackageManager.PERMISSION_GRANTED
+    ) return false
+    if (Build.VERSION.SDK_INT >= 26) {
+        manager.createNotificationChannel(
+            NotificationChannel(channelId, name, NotificationManager.IMPORTANCE_DEFAULT).apply { this.description = description },
+        )
+    }
+    return true
+}

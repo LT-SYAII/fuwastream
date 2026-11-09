@@ -99,6 +99,10 @@
     <string name="mine_seconds_short">%1$ds</string>
     <string name="mine_notify_new">Pemberitahuan episod baharu</string>
     <string name="mine_notify_new_desc">Semak anime kegemaran yang masih bersiaran setiap 6 jam</string>
+    <string name="mine_notify_releases">Pemberitahuan keluaran anime</string>
+    <string name="mine_notify_releases_desc">Episod baharu daripada semua anime yang sedang bersiaran, bukan kegemaran sahaja</string>
+    <string name="mine_notify_chapters">Pemberitahuan chapter manga</string>
+    <string name="mine_notify_chapters_desc">Chapter baharu daripada manga yang sedang berjalan (MangaDex, bahasa aplikasi)</string>
     <string name="mine_download_quality">Kualiti muat turun</string>
     <string name="mine_wifi_only">Muat turun hanya melalui Wi-Fi</string>
     <string name="mine_wifi_only_desc">Jimat kuota, muat turun menunggu sehingga disambungkan ke Wi-Fi</string>

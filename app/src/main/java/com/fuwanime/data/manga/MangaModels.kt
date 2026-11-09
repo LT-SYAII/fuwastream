@@ -40,6 +40,28 @@ data class MangaChapter(
     val publishAt: Long,
 )
 
+/** A newly published chapter of an ongoing manga, for the release notifications. */
+data class MangaRelease(
+    val mangaId: String,
+    val title: String,
+    val chapter: String?,
+    val publishAt: Long,
+)
+
+/** Reads the owning manga off a chapter from the global `/chapter` feed (`includes[]=manga`); null when absent or not ongoing. */
+fun ChapterDto.mangaRelease(): MangaRelease? {
+    val rel = relationships.firstOrNull { it.type == "manga" && it.id.isNotBlank() } ?: return null
+    val status = rel.attributes?.status
+    if (status != null && !status.equals("ongoing", true)) return null
+    val titles = loc(rel.attributes?.title)
+    val title = titles["en"] ?: titles["ja-ro"] ?: titles.values.firstOrNull() ?: return null
+    val ch = toChapter()
+    return MangaRelease(rel.id, title, ch.number, ch.publishAt)
+}
+
+/** One entry per manga; a publishAt-desc feed makes the first occurrence the newest chapter. */
+fun latestPerManga(releases: List<MangaRelease>): List<MangaRelease> = releases.distinctBy { it.mangaId }
+
 data class MangaTag(val id: String, val name: String, val group: String)
 
 @Suppress("UNCHECKED_CAST")

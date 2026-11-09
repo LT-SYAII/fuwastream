@@ -43,6 +43,7 @@ class MainActivity : ComponentActivity() {
 
     private fun Intent.launchTarget() = parseLaunchTarget(
         getStringExtra(EXTRA_OPEN_ANIME_ID), getStringExtra(EXTRA_OPEN_TAB), getStringExtra(EXTRA_RESUME_EPISODE_ID),
+        getStringExtra(EXTRA_OPEN_MANGA_ID),
     )
 
     override fun attachBaseContext(base: Context) = super.attachBaseContext(localizedContext(base))
@@ -131,6 +132,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_OPEN_ANIME_ID = "open_anime_id"
+        const val EXTRA_OPEN_MANGA_ID = "open_manga_id"
         /** [TAB_EXPLORE_SEARCH] or [TAB_SCHEDULE]. */
         const val EXTRA_OPEN_TAB = "open_tab"
         const val EXTRA_RESUME_EPISODE_ID = "resume_episode_id"

@@ -241,6 +241,7 @@ fun FuwaNavHost(initialTarget: LaunchTarget? = null, onInitialTargetConsumed: ()
     LaunchedEffect(initialTarget) {
         when (val target = initialTarget ?: return@LaunchedEffect) {
             is LaunchTarget.Anime -> nav.navigate(Routes.detail(target.id))
+            is LaunchTarget.Manga -> nav.navigate(Routes.mangaDetail(target.id))
             LaunchTarget.Search -> openExplore(null, true)
             LaunchTarget.Schedule -> nav.navigateTab(Routes.SCHEDULE)
             is LaunchTarget.Resume -> resumeRoute(container.libraryRepository.historyEntry(target.episodeId))?.let { nav.navigate(it) }

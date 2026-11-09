@@ -38,6 +38,7 @@ import com.fuwanime.data.remote.NetworkStatus
 import com.fuwanime.data.remote.apiCacheClient
 import com.fuwanime.data.UpdateRepository
 import com.fuwanime.data.notify.EpisodeNotifyWorker
+import com.fuwanime.data.notify.ReleaseNotifyWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -146,6 +147,7 @@ class FuwaApp : Application(), SingletonImageLoader.Factory {
         super.onCreate()
         container = AppContainer(this)
         EpisodeNotifyWorker.schedule(this)
+        ReleaseNotifyWorker.schedule(this)
         container.appScope.launch {
             val backup = container.settingsStore.backup.first()
             if (backup.treeUri != null && backup.auto) BackupWorker.schedule(this@FuwaApp)
