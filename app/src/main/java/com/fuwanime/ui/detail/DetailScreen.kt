@@ -145,6 +145,9 @@ import com.fuwanime.data.local.WatchHistoryEntity
 import com.fuwanime.data.local.CollectionStatus
 import com.fuwanime.data.local.ContentPreferenceEntity
 import com.fuwanime.data.local.TitleNotifyMode
+import com.fuwanime.data.notify.NotificationAccess
+import com.fuwanime.data.notify.notificationAccess
+import com.fuwanime.data.notify.openNotificationSettings
 import com.fuwanime.ui.components.ErrorState
 import com.fuwanime.ui.components.NetImage
 import com.fuwanime.ui.components.PosterRow
@@ -885,6 +888,8 @@ private fun AnimeNotificationDialog(
     onAutoDownload: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val blocked = notificationAccess(context) != NotificationAccess.GRANTED
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.ux_notification_title)) },
@@ -911,6 +916,17 @@ private fun AnimeNotificationDialog(
                 ) {
                     androidx.compose.material3.Checkbox(autoDownload, onCheckedChange = onAutoDownload)
                     Text(stringResource(R.string.ux_auto_download))
+                }
+                if (blocked) {
+                    Text(
+                        stringResource(R.string.ux_notify_blocked),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    TextButton(onClick = { openNotificationSettings(context) }) {
+                        Text(stringResource(R.string.mine_notify_open_settings))
+                    }
                 }
             }
         },
