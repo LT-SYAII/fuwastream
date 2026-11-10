@@ -84,7 +84,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.SnackbarHost
+import com.fuwanime.ui.components.FuwaSnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
@@ -249,7 +249,7 @@ fun SettingsRoute(onBack: () -> Unit, onOpenLegal: (String) -> Unit) {
                 modifier = Modifier.hazeEffect(hazeState, frostedStyle()),
             )
         },
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = { FuwaSnackbarHost(snackbar) },
     ) { padding ->
         LazyColumn(
             Modifier.fillMaxHeight().readableWidth().hazeSource(hazeState),

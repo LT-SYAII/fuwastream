@@ -12,7 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.SnackbarHost
+import com.fuwanime.ui.components.FuwaSnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
@@ -436,7 +436,7 @@ fun MangaDetailRoute(mangaId: String, onBack: () -> Unit, onRead: (mangaId: Stri
                 }
             }
         }
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
+        FuwaSnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
         IconButton(onClick = onBack, modifier = Modifier.statusBarsPadding().padding(4.dp)) {
             Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.mine_back))
         }

@@ -167,7 +167,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarHost
+import com.fuwanime.ui.components.FuwaSnackbarHost
 import com.fuwanime.data.Episode
 import com.fuwanime.data.OpMark
 import com.fuwanime.data.StreamSource
@@ -531,7 +531,7 @@ fun PlayerRoute(
             }
         }
         // One snackbar host for both layouts so messages (download started/failed) are visible fullscreen too.
-        SnackbarHost(
+        FuwaSnackbarHost(
             snackbar,
             Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.navigationBars),
         )

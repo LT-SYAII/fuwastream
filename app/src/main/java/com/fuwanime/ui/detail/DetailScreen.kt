@@ -139,7 +139,7 @@ import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarHost
+import com.fuwanime.ui.components.FuwaSnackbarHost
 import com.fuwanime.data.Episode
 import com.fuwanime.data.local.WatchHistoryEntity
 import com.fuwanime.data.local.CollectionStatus
@@ -202,7 +202,7 @@ fun DetailRoute(
             onAnimeClick,
             onGenre,
         )
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
+        FuwaSnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
     }
 }
 
