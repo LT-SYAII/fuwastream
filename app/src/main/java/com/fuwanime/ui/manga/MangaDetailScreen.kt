@@ -15,6 +15,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.RadioButton
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material.icons.rounded.Download
@@ -67,6 +69,7 @@ import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -90,6 +93,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.fuwanime.R
 import com.fuwanime.data.local.MangaHistoryEntity
+import com.fuwanime.data.local.CollectionStatus
+import com.fuwanime.data.local.ContentPreferenceEntity
+import com.fuwanime.data.local.TitleNotifyMode
 import com.fuwanime.data.manga.Manga
 import com.fuwanime.data.manga.MangaChapter
 import com.fuwanime.data.manga.MangaLibrary
@@ -144,6 +150,8 @@ data class MangaDetailState(
     val chaptersError: UiText? = null,
     val history: List<MangaHistoryEntity> = emptyList(),
     val favorite: Boolean = false,
+    val collectionStatus: CollectionStatus? = null,
+    val preference: ContentPreferenceEntity? = null,
 )
 
 class MangaDetailViewModel(
@@ -172,8 +180,8 @@ class MangaDetailViewModel(
     private val remote = MutableStateFlow(Remote())
 
     val state: StateFlow<MangaDetailState> =
-        combine(remote, library.historyFor(id), library.isFavorite(id)) { r, h, f ->
-            MangaDetailState(r.manga, r.chapters, r.error, r.chaptersError, h, f)
+        combine(remote, library.historyFor(id), library.isFavorite(id), library.collectionStatus(id), library.preference(id)) { r, h, f, status, pref ->
+            MangaDetailState(r.manga, r.chapters, r.error, r.chaptersError, h, f, status, pref)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MangaDetailState())
 
     init { load() }
@@ -201,6 +209,35 @@ class MangaDetailViewModel(
         val manga = state.value.manga ?: return
         viewModelScope.launch { library.setFavorite(manga, !state.value.favorite) }
     }
+
+    fun setCollectionStatus(status: CollectionStatus?) {
+        val manga = state.value.manga ?: return
+        viewModelScope.launch { library.setCollectionStatus(manga, status) }
+    }
+
+    fun setHiddenFromContinue(hidden: Boolean) = viewModelScope.launch {
+        library.updatePreference(id) { it.copy(hiddenFromContinue = hidden) }
+    }
+
+    fun setNotificationMode(mode: TitleNotifyMode) = viewModelScope.launch {
+        library.updatePreference(id) { it.copy(notifyMode = mode.name) }
+    }
+
+    fun setAutoDownload(enabled: Boolean) = viewModelScope.launch {
+        library.updatePreference(id) { it.copy(autoDownload = enabled) }
+    }
+
+    fun markChapter(chapter: MangaChapter, label: String, read: Boolean) {
+        val manga = state.value.manga ?: return
+        viewModelScope.launch { library.markChapter(manga, chapter, label, read) }
+    }
+
+    fun markBefore(chapter: MangaChapter, chapters: List<MangaChapter>, label: (MangaChapter) -> String) {
+        val manga = state.value.manga ?: return
+        val target = numberKey(chapter)?.toDoubleOrNull() ?: return
+        val before = chapters.filter { c -> numberKey(c)?.toDoubleOrNull()?.let { it < target } == true }
+        viewModelScope.launch { library.markChapters(manga, before, label, true) }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -221,6 +258,8 @@ fun MangaDetailRoute(mangaId: String, onBack: () -> Unit, onRead: (mangaId: Stri
             if (n > 0) scope.launch { snackbar.showSnackbar(ctx.resources.getQuantityString(R.plurals.manga_download_queued, n, n)) }
         }
     }
+    var collectionOpen by rememberSaveable { mutableStateOf(false) }
+    var notificationOpen by rememberSaveable { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
         val manga = state.manga
@@ -259,7 +298,14 @@ fun MangaDetailRoute(mangaId: String, onBack: () -> Unit, onRead: (mangaId: Stri
                     Modifier.fillMaxSize().readableWidth(),
                     contentPadding = PaddingValues(bottom = 24.dp),
                 ) {
-                    item(key = "header") { Header(manga, state.favorite, vm::toggleFavorite) }
+                    item(key = "header") {
+                        Header(
+                            manga = manga,
+                            favorite = state.favorite,
+                            onCollection = { collectionOpen = true },
+                            onNotification = { notificationOpen = true },
+                        )
+                    }
                     item(key = "info") {
                         val own = when {
                             isShinigamiId(mangaId) -> "Shinigami"
@@ -357,6 +403,8 @@ fun MangaDetailRoute(mangaId: String, onBack: () -> Unit, onRead: (mangaId: Stri
                                             download = downloads[c.id],
                                             onDownload = { queue(listOf(c)) },
                                             onDelete = { vm.deleteDownload(c.id) },
+                                            onMark = { read -> vm.markChapter(c, labelOf(c), read) },
+                                            onMarkBefore = { vm.markBefore(c, chapters, labelOf) },
                                         ) { onRead(readId, c.id) }
                                     }
                                     repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
@@ -390,6 +438,24 @@ fun MangaDetailRoute(mangaId: String, onBack: () -> Unit, onRead: (mangaId: Stri
             Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.mine_back))
         }
     }
+    if (collectionOpen) {
+        MangaCollectionDialog(
+            selected = state.collectionStatus,
+            hiddenFromContinue = state.preference?.hiddenFromContinue == true,
+            onSelect = { vm.setCollectionStatus(it); collectionOpen = false },
+            onHidden = vm::setHiddenFromContinue,
+            onDismiss = { collectionOpen = false },
+        )
+    }
+    if (notificationOpen) {
+        MangaNotificationDialog(
+            selected = state.preference?.notifyMode?.let { raw -> TitleNotifyMode.entries.firstOrNull { it.name == raw } } ?: TitleNotifyMode.DEFAULT,
+            autoDownload = state.preference?.autoDownload == true,
+            onMode = vm::setNotificationMode,
+            onAutoDownload = vm::setAutoDownload,
+            onDismiss = { notificationOpen = false },
+        )
+    }
 }
 
 private val SOURCE_NAMES = listOf("Shinigami", "Komiku", "MangaDex") // indexed by sourceRank
@@ -401,7 +467,7 @@ internal fun chapterLabel(c: MangaChapter): String =
     c.number?.let { stringResource(R.string.manga_chapter_number, it) } ?: c.title?.takeIf { it.isNotBlank() } ?: stringResource(R.string.manga_chapter_oneshot)
 
 @Composable
-private fun Header(manga: Manga, favorite: Boolean, onToggleFavorite: () -> Unit) {
+private fun Header(manga: Manga, favorite: Boolean, onCollection: () -> Unit, onNotification: () -> Unit) {
     Row(Modifier.statusBarsPadding().padding(start = 20.dp, end = 12.dp, top = 52.dp), verticalAlignment = Alignment.Bottom) {
         NetImage(
             manga.coverUrl.orEmpty(),
@@ -413,10 +479,13 @@ private fun Header(manga: Manga, favorite: Boolean, onToggleFavorite: () -> Unit
             manga.author?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             manga.type?.let { Text(it, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary) }
         }
-        IconButton(onClick = onToggleFavorite) {
+        IconButton(onClick = onNotification) {
+            Icon(Icons.Rounded.Notifications, stringResource(R.string.ux_notification_title), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        IconButton(onClick = onCollection) {
             Icon(
                 if (favorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                stringResource(if (favorite) R.string.manga_favorite_remove else R.string.manga_favorite_add),
+                stringResource(R.string.ux_collection_change),
                 tint = if (favorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -481,6 +550,8 @@ private fun ChapterCell(
     download: MangaDownloadEntity?,
     onDownload: () -> Unit,
     onDelete: () -> Unit,
+    onMark: (Boolean) -> Unit,
+    onMarkBefore: () -> Unit,
     onClick: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -524,9 +595,86 @@ private fun ChapterCell(
             }
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(if (read) R.string.ux_mark_unread else R.string.ux_mark_read)) },
+                onClick = { menuOpen = false; onMark(!read) },
+            )
+            DropdownMenuItem(text = { Text(stringResource(R.string.ux_mark_before_read)) }, onClick = { menuOpen = false; onMarkBefore() })
             DropdownMenuItem(text = { Text(actionLabel) }, onClick = { menuOpen = false; act() })
         }
     }
+}
+
+@Composable
+private fun MangaCollectionDialog(
+    selected: CollectionStatus?,
+    hiddenFromContinue: Boolean,
+    onSelect: (CollectionStatus?) -> Unit,
+    onHidden: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.ux_collection)) },
+        text = { Column {
+            CollectionStatus.entries.forEach { status ->
+                val label = when (status) {
+                    CollectionStatus.PLANNED -> R.string.ux_status_planned
+                    CollectionStatus.IN_PROGRESS -> R.string.ux_status_in_progress
+                    CollectionStatus.WAITING -> R.string.ux_status_waiting
+                    CollectionStatus.PAUSED -> R.string.ux_status_paused
+                    CollectionStatus.COMPLETED -> R.string.ux_status_completed
+                    CollectionStatus.DROPPED -> R.string.ux_status_dropped
+                }
+                Row(Modifier.fillMaxWidth().clickable { onSelect(status) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected == status, onClick = { onSelect(status) })
+                    Text(stringResource(label))
+                }
+            }
+            if (selected != null) {
+                Row(Modifier.fillMaxWidth().clickable { onHidden(!hiddenFromContinue) }.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(hiddenFromContinue, onCheckedChange = onHidden)
+                    Text(stringResource(R.string.ux_hide_continue))
+                }
+            }
+        } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.ux_done)) } },
+        dismissButton = { if (selected != null) TextButton(onClick = { onSelect(null) }) { Text(stringResource(R.string.ux_collection_remove)) } },
+    )
+}
+
+@Composable
+private fun MangaNotificationDialog(
+    selected: TitleNotifyMode,
+    autoDownload: Boolean,
+    onMode: (TitleNotifyMode) -> Unit,
+    onAutoDownload: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.ux_notification_title)) },
+        text = { Column {
+            // The release feed only carries ongoing manga, so a "final chapter" mode could never fire.
+            TitleNotifyMode.entries.filter { it != TitleNotifyMode.FINAL_ONLY }.forEach { mode ->
+                val label = when (mode) {
+                    TitleNotifyMode.DEFAULT -> R.string.ux_notify_default
+                    TitleNotifyMode.ALL -> R.string.ux_notify_all
+                    TitleNotifyMode.FINAL_ONLY -> R.string.ux_notify_final
+                    TitleNotifyMode.OFF -> R.string.ux_notify_off
+                }
+                Row(Modifier.fillMaxWidth().clickable { onMode(mode) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected == mode, onClick = { onMode(mode) })
+                    Text(stringResource(label))
+                }
+            }
+            Row(Modifier.fillMaxWidth().clickable { onAutoDownload(!autoDownload) }.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.Checkbox(autoDownload, onCheckedChange = onAutoDownload)
+                Text(stringResource(R.string.ux_auto_download))
+            }
+        } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.ux_done)) } },
+    )
 }
 
 /** Small download state mark in a chapter cell. */

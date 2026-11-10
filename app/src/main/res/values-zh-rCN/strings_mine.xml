@@ -23,8 +23,8 @@
     <string name="mine_episode_cd">%1$s — 第%2$s集</string>
     <string name="mine_not_selected">未选择</string>
     <string name="mine_remove_from_history">从记录中移除</string>
-    <string name="mine_favorites_empty_title">暂无收藏</string>
-    <string name="mine_favorites_empty_body">点按动画页面上的心形图标即可收藏到这里。</string>
+    <string name="mine_favorites_empty_title">收藏为空</string>
+    <string name="mine_favorites_empty_body">打开动画页面并点按心形图标以选择收藏状态。</string>
     <string name="mine_downloads_empty_title">暂无下载</string>
     <string name="mine_downloads_empty_body">点按剧集列表或播放器中的下载图标，即可离线观看。</string>
     <string name="mine_delete_watched">删除已看完的（%1$d • %2$s）</string>

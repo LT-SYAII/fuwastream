@@ -23,8 +23,8 @@
     <string name="mine_episode_cd">%1$s — Episode %2$s</string>
     <string name="mine_not_selected">Tidak dipilih</string>
     <string name="mine_remove_from_history">Hapus dari riwayat</string>
-    <string name="mine_favorites_empty_title">Belum ada favorit</string>
-    <string name="mine_favorites_empty_body">Ketuk ikon hati di halaman anime untuk menyimpannya di sini.</string>
+    <string name="mine_favorites_empty_title">Koleksi masih kosong</string>
+    <string name="mine_favorites_empty_body">Buka halaman anime, lalu ketuk ikon hati untuk memilih status koleksi.</string>
     <string name="mine_downloads_empty_title">Belum ada unduhan</string>
     <string name="mine_downloads_empty_body">Ketuk ikon download di daftar episode atau di pemutar untuk menonton tanpa internet.</string>
     <string name="mine_delete_watched">Hapus yang sudah ditonton (%1$d • %2$s)</string>

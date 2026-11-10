@@ -23,8 +23,8 @@
     <string name="mine_episode_cd">%1$s — Episode %2$s</string>
     <string name="mine_not_selected">Not selected</string>
     <string name="mine_remove_from_history">Remove from history</string>
-    <string name="mine_favorites_empty_title">No favorites yet</string>
-    <string name="mine_favorites_empty_body">Tap the heart icon on an anime page to save it here.</string>
+    <string name="mine_favorites_empty_title">Your collection is empty</string>
+    <string name="mine_favorites_empty_body">Open an anime page and tap the heart to choose a collection status.</string>
     <string name="mine_downloads_empty_title">No downloads yet</string>
     <string name="mine_downloads_empty_body">Tap the download icon in the episode list or the player to watch without internet.</string>
     <string name="mine_delete_watched">Delete watched (%1$d • %2$s)</string>
