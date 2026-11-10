@@ -3,6 +3,7 @@ package com.fuwanime.data.manga
 import com.fuwanime.R
 import com.fuwanime.util.UiText
 import com.fuwanime.util.UiTextException
+import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -30,6 +31,14 @@ class MangaRepository(
     @Volatile private var tagCache: List<MangaTag>? = null
     private val sourceCache = ConcurrentHashMap<String, List<Manga>>()
     private val mergedCache = ConcurrentHashMap<String, List<MangaChapter>>()
+
+    /**
+     * False after a MangaDex network or server failure. The manga UI uses it to keep Shinigami/Komiku
+     * usable and to explain why the global shelves are missing. A successful call restores it.
+     */
+    @Volatile
+    var mangaDexReachable: Boolean = true
+        private set
 
     suspend fun browse(
         order: MangaOrder,
@@ -158,9 +167,14 @@ class MangaRepository(
         .sortedBy { it.name }.also { tagCache = it }
 
     private suspend fun <T> call(block: suspend () -> T): T = try {
-        block()
+        block().also { mangaDexReachable = true }
     } catch (e: HttpException) {
-        if (e.code() == 404) throw notFound() else throw e
+        if (e.code() == 404) throw notFound()
+        if (e.code() == 429 || e.code() >= 500) mangaDexReachable = false
+        throw e
+    } catch (e: IOException) {
+        mangaDexReachable = false
+        throw e
     }
 
     private suspend fun ratings() = if (mature()) RATINGS_MATURE else RATINGS

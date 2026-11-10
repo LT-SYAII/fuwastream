@@ -100,6 +100,7 @@ import com.fuwanime.data.manga.nextChapter
 import com.fuwanime.data.manga.previousChapter
 import com.fuwanime.ui.components.ErrorState
 import com.fuwanime.util.UiText
+import com.fuwanime.util.UiTextException
 import com.fuwanime.util.friendlyText
 import com.fuwanime.util.fuwaViewModel
 import kotlinx.coroutines.CancellationException
@@ -161,6 +162,15 @@ class MangaReaderViewModel(
 
     init { open(firstChapterId) }
 
+    private fun isMangaDexId(id: String) = !isShinigamiId(id) && !isKomikuId(id)
+
+    /** A MangaDex title or merged MangaDex chapter can't load when the ISP blocks the API. */
+    private fun errorText(e: Throwable, sourceId: String): UiText = when {
+        e is UiTextException -> e.text
+        !repo.mangaDexReachable && (isMangaDexId(mangaId) || isMangaDexId(sourceId)) -> UiText(R.string.manga_source_dex_down)
+        else -> e.friendlyText()
+    }
+
     fun open(chapterId: String) {
         _state.value = _state.value.copy(chapter = null, pages = null, error = null, requestedId = chapterId)
         viewModelScope.launch {
@@ -193,7 +203,7 @@ class MangaReaderViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.value = _state.value.copy(error = e.friendlyText())
+                _state.value = _state.value.copy(error = errorText(e, chapterId))
             }
         }
     }
@@ -202,8 +212,14 @@ class MangaReaderViewModel(
     fun refreshPages() {
         val chapter = _state.value.chapter ?: return
         viewModelScope.launch {
-            runCatching { repo.pages(chapter.id, settings.mangaDataSaver.first(), forceRefresh = true) }
-                .onSuccess { pages -> _state.value = _state.value.copy(pages = pages, generation = _state.value.generation + 1) }
+            try {
+                val pages = repo.pages(chapter.id, settings.mangaDataSaver.first(), forceRefresh = true)
+                _state.value = _state.value.copy(pages = pages, generation = _state.value.generation + 1)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(error = errorText(e, chapter.id))
+            }
         }
     }
 

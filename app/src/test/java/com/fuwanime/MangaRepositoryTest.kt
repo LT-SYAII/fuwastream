@@ -8,6 +8,7 @@ import com.fuwanime.data.manga.MangaOrder
 import com.fuwanime.data.manga.MangaRepository
 import com.fuwanime.data.manga.RateLimitInterceptor
 import com.fuwanime.util.UiTextException
+import java.io.IOException
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -148,6 +149,53 @@ class MangaRepositoryTest {
         } catch (e: UiTextException) {
             assertEquals(R.string.manga_error_not_found, e.text.id)
         }
+        // A missing title is not a blocked catalogue; the MangaDex shelves should stay visible.
+        assertTrue(repo.mangaDexReachable)
+    }
+
+    @Test fun mangaDexReachableFollowsNetworkAndServerFailures() = runBlocking {
+        assertTrue(repo.mangaDexReachable)
+
+        server.enqueue(json(fixture("manga_list.json")))
+        repo.browse(MangaOrder.POPULAR)
+        assertTrue(repo.mangaDexReachable)
+
+        server.enqueue(MockResponse().setResponseCode(429).addHeader("Retry-After", "0"))
+        try {
+            repo.browse(MangaOrder.POPULAR)
+            fail("expected HttpException")
+        } catch (e: HttpException) {
+            assertEquals(429, e.code())
+        }
+        assertFalse(repo.mangaDexReachable)
+
+        // A later success means the block/outage is over.
+        server.enqueue(json(fixture("manga_list.json")))
+        repo.browse(MangaOrder.POPULAR)
+        assertTrue(repo.mangaDexReachable)
+
+        server.enqueue(MockResponse().setResponseCode(503))
+        try {
+            repo.browse(MangaOrder.POPULAR)
+            fail("expected HttpException")
+        } catch (e: HttpException) {
+            assertEquals(503, e.code())
+        }
+        assertFalse(repo.mangaDexReachable)
+
+        server.enqueue(json(fixture("manga_list.json")))
+        repo.browse(MangaOrder.POPULAR)
+        assertTrue(repo.mangaDexReachable)
+
+        // Blocked ISPs reset the TLS connection, which surfaces as an IOException.
+        val blocked = repoWith(OkHttpClient.Builder().addInterceptor { throw IOException("connection reset") }.build())
+        try {
+            blocked.browse(MangaOrder.POPULAR)
+            fail("expected IOException")
+        } catch (e: IOException) {
+            // expected
+        }
+        assertFalse(blocked.mangaDexReachable)
     }
 
     /** Wraps [inner] so the rate limiter sees host api.mangadex.org while the request still reaches the mock server. */

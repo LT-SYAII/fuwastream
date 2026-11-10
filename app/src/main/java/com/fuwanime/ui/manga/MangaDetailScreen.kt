@@ -110,6 +110,7 @@ import com.fuwanime.ui.components.NetImage
 import com.fuwanime.ui.components.TagChip
 import com.fuwanime.ui.components.readableWidth
 import com.fuwanime.util.UiText
+import com.fuwanime.util.UiTextException
 import com.fuwanime.util.friendlyText
 import com.fuwanime.util.fuwaViewModel
 import kotlinx.coroutines.CancellationException
@@ -194,7 +195,12 @@ class MangaDetailViewModel(
         repo.clearMerged(id)
         viewModelScope.launch {
             val manga = try { repo.detail(id) } catch (e: CancellationException) { throw e } catch (e: Exception) {
-                remote.value = Remote(error = e.friendlyText()); return@launch
+                val error = when {
+                    e is UiTextException -> e.text
+                    !repo.mangaDexReachable && !isShinigamiId(id) && !isKomikuId(id) -> UiText(R.string.manga_source_dex_down)
+                    else -> e.friendlyText()
+                }
+                remote.value = Remote(error = error); return@launch
             }
             remote.value = Remote(manga = manga)
             try {
@@ -203,7 +209,12 @@ class MangaDetailViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                remote.value = remote.value.copy(chaptersError = e.friendlyText())
+                val error = if (!repo.mangaDexReachable && !isShinigamiId(id) && !isKomikuId(id)) {
+                    UiText(R.string.manga_source_dex_down)
+                } else {
+                    e.friendlyText()
+                }
+                remote.value = remote.value.copy(chaptersError = error)
             }
         }
     }

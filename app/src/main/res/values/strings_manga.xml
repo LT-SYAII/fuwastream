@@ -1,5 +1,8 @@
 <resources>
     <string name="manga_error_not_found">Manga tidak ditemukan.</string>
+    <string name="manga_source_dex_down">MangaDex tidak dapat diakses dari jaringan ini. Sumber Indonesia tetap tersedia.</string>
+    <string name="manga_source_dex_retry">Coba lagi</string>
+    <string name="manga_source_dex_filter">Filter genre dan status membutuhkan MangaDex. Hapus filter atau gunakan pencarian.</string>
     <string name="manga_status_ongoing">Berjalan</string>
     <string name="manga_status_completed">Tamat</string>
     <string name="manga_status_hiatus">Hiatus</string>

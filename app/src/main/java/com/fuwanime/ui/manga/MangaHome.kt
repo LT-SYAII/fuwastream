@@ -43,6 +43,8 @@ data class MangaHomeState(
     val latest: MangaShelf = MangaShelf(),
     val continueReading: List<MangaHistoryEntity> = emptyList(),
     val refreshing: Boolean = false,
+    /** MangaDex failed; the Indonesian shelves stay visible and the global ones are hidden. */
+    val mangaDexDown: Boolean = false,
 )
 
 class MangaHomeViewModel(private val repo: MangaRepository, library: MangaLibrary) : ViewModel() {
@@ -50,11 +52,18 @@ class MangaHomeViewModel(private val repo: MangaRepository, library: MangaLibrar
     private val komiku = MutableStateFlow(MangaShelf())
     private val popular = MutableStateFlow(MangaShelf())
     private val latest = MutableStateFlow(MangaShelf())
+    private val dexDown = MutableStateFlow(false)
     private val refreshing = MutableStateFlow(false)
     private var started = false
 
-    val state: StateFlow<MangaHomeState> = combine(combine(indonesia, komiku, ::Pair), popular, latest, library.continueReading, refreshing) { ik, p, l, c, r ->
-        MangaHomeState(ik.first, ik.second, p, l, c, r)
+    val state: StateFlow<MangaHomeState> = combine(
+        combine(indonesia, komiku, ::Pair),
+        popular,
+        latest,
+        combine(library.continueReading, dexDown, ::Pair),
+        refreshing,
+    ) { ik, p, l, cd, r ->
+        MangaHomeState(ik.first, ik.second, p, l, cd.first, r, mangaDexDown = cd.second)
     }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MangaHomeState())
 
@@ -73,6 +82,11 @@ class MangaHomeViewModel(private val repo: MangaRepository, library: MangaLibrar
                 launch { load(popular, MangaOrder.POPULAR) }
                 launch { load(latest, MangaOrder.LATEST) }
             }
+            // Only show the source-specific notice when at least one Indonesian source really works.
+            // If every source failed (for example, fully offline), keep the normal connection errors.
+            val dexFailed = popular.value.error != null || latest.value.error != null
+            val indonesiaAvailable = indonesia.value.error == null || komiku.value.error == null
+            dexDown.value = dexFailed && indonesiaAvailable
             refreshing.value = false
         }
     }
@@ -103,6 +117,11 @@ fun LazyListScope.mangaHomeItems(
     middle: (@Composable () -> Unit)? = null,
 ) {
     item(key = "mTop") { Spacer(Modifier.height(topPad)) }
+    if (state.mangaDexDown) {
+        item(key = "mDexDown") {
+            MangaSourceNotice(onRetry, Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+        }
+    }
     if (state.continueReading.isNotEmpty()) {
         item(key = "mContinue") {
             val posters = state.continueReading.map { Anime(id = it.mangaId, title = it.mangaTitle, poster = it.coverUrl.orEmpty()) }
@@ -116,8 +135,13 @@ fun LazyListScope.mangaHomeItems(
     shelf(R.string.manga_home_popular_id, "mIndonesia", state.indonesia, onRetry, onMangaClick)
     shelf(R.string.manga_home_komiku, "mKomiku", state.komiku, onRetry, onMangaClick)
     if (middle != null) item(key = "mMiddle") { middle() }
-    shelf(R.string.manga_home_popular, "mPopular", state.popular, onRetry, onMangaClick)
-    shelf(R.string.manga_home_latest, "mLatest", state.latest, onRetry, onMangaClick)
+    // Keep cached global shelves on screen, but don't show two error cards when MangaDex is blocked.
+    if (!state.mangaDexDown || state.popular.items.isNotEmpty()) {
+        shelf(R.string.manga_home_popular, "mPopular", state.popular, onRetry, onMangaClick)
+    }
+    if (!state.mangaDexDown || state.latest.items.isNotEmpty()) {
+        shelf(R.string.manga_home_latest, "mLatest", state.latest, onRetry, onMangaClick)
+    }
 }
 
 private fun LazyListScope.shelf(title: Int, key: String, shelf: MangaShelf, onRetry: () -> Unit, onMangaClick: (String) -> Unit) {

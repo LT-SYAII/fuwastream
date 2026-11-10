@@ -1,5 +1,8 @@
 <resources>
     <string name="manga_error_not_found">未找到该漫画。</string>
+    <string name="manga_source_dex_down">当前网络无法访问 MangaDex。印尼漫画源仍可使用。</string>
+    <string name="manga_source_dex_retry">重试</string>
+    <string name="manga_source_dex_filter">类型和状态筛选需要 MangaDex。请清除筛选或使用搜索。</string>
     <string name="manga_status_ongoing">连载中</string>
     <string name="manga_status_completed">已完结</string>
     <string name="manga_status_hiatus">休刊中</string>
