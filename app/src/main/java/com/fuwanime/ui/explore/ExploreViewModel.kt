@@ -68,8 +68,6 @@ data class ExploreUiState(
     /** Universal search: manga hits shown next to the anime results. */
     val mangaResults: List<Manga> = emptyList(),
     val mangaLoading: Boolean = false,
-    /** Additive anime source (Kuramanime) shown as a separate section. */
-    val kuramanimeResults: List<Anime> = emptyList(),
     val kuramanimeLoading: Boolean = false,
 )
 
@@ -95,6 +93,7 @@ class ExploreViewModel(
     private var debounceJob: Job? = null
     private var mangaJob: Job? = null
     private var kuramanimeJob: Job? = null
+    private var kuramanimeRaw = emptyList<Anime>()
 
     init {
         reload()
@@ -140,7 +139,8 @@ class ExploreViewModel(
         raw.clear()
         seen.clear()
         nextPage = 0
-        _state.update { it.copy(results = emptyList(), loading = true, endReached = false, error = null, kuramanimeResults = emptyList()) }
+        kuramanimeRaw = emptyList()
+        _state.update { it.copy(results = emptyList(), loading = true, endReached = false, error = null) }
         loadMore()
         searchManga(_state.value.filters.query)
         searchKuramanime(_state.value.filters.query)
@@ -190,8 +190,9 @@ class ExploreViewModel(
             } catch (e: Exception) {
                 Result.failure(e)
             }
-            val items = result.getOrDefault(emptyList()).take(if (q.length >= 2) 30 else 18)
-            _state.update { it.copy(kuramanimeResults = items, kuramanimeLoading = false) }
+            kuramanimeRaw = result.getOrDefault(emptyList()).take(if (q.length >= 2) 30 else 18)
+            _state.update { it.copy(kuramanimeLoading = false) }
+            refilter(fillPage = false)
         }
     }
 
@@ -234,11 +235,25 @@ class ExploreViewModel(
                 // Server-filtered pages already match; keyword searches are type-filtered here.
                 f.type.matches(a.type)
         }
-        _state.update { it.copy(results = filtered) }
-        if (fillPage) {
-            if (filtered.size < MIN_BATCH && !_state.value.endReached) loadMore()
+        val krFiltered = kuramanimeRaw.filter { a ->
+            // For explicit searches, trust the source's keyword match; for browse, apply local filters.
+            (f.query.trim().length >= 2 || matchesGenres(a, f.genres)) &&
+                when (f.status) {
+                    StatusFilter.ALL -> true
+                    StatusFilter.ONGOING -> a.isOngoing
+                    StatusFilter.FINISHED -> !a.isOngoing && !a.isUpcoming
+                } &&
+                f.type.matches(a.type)
         }
-        return filtered.size
+        // Kuramanime items merged in (deduped) so all sources appear as one list.
+        val merged = (filtered + krFiltered)
+            .distinctBy { it.id }
+            .distinctBy { it.title.trim().lowercase() }
+        _state.update { it.copy(results = merged) }
+        if (fillPage) {
+            if (merged.size < MIN_BATCH && !_state.value.endReached) loadMore()
+        }
+        return merged.size
     }
 
     private companion object {

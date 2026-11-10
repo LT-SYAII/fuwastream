@@ -32,8 +32,8 @@ android {
     targetSdk = 37
     // F-Droid & CI pass VERSION_CODE/VERSION_NAME as env vars. Fallback to fixed
     // values when not set (deterministic, not epoch minutes).
-    versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 7
-    versionName = System.getenv("VERSION_NAME") ?: "2.1.4"
+    versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 8
+    versionName = System.getenv("VERSION_NAME") ?: "2.1.5"
     // The in-app update checker looks at the repo this APK was built from (a fork checks its own releases).
     buildConfigField("String", "UPDATE_REPO", "\"${System.getenv("GITHUB_REPOSITORY") ?: "LT-SYAII/fuwastream"}\"")
   }
