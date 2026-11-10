@@ -44,6 +44,7 @@ data class MangaChapter(
 data class MangaRelease(
     val mangaId: String,
     val title: String,
+    val chapterId: String,
     val chapter: String?,
     val publishAt: Long,
 )
@@ -56,7 +57,7 @@ fun ChapterDto.mangaRelease(): MangaRelease? {
     val titles = loc(rel.attributes?.title)
     val title = titles["en"] ?: titles["ja-ro"] ?: titles.values.firstOrNull() ?: return null
     val ch = toChapter()
-    return MangaRelease(rel.id, title, ch.number, ch.publishAt)
+    return MangaRelease(rel.id, title, ch.id, ch.number, ch.publishAt)
 }
 
 /** One entry per manga; a publishAt-desc feed makes the first occurrence the newest chapter. */
@@ -206,4 +207,3 @@ fun previousChapter(list: List<MangaChapter>, currentId: String): MangaChapter? 
 
 fun pageUrls(baseUrl: String, hash: String, data: List<String>, dataSaver: List<String>, useDataSaver: Boolean): List<String> =
     if (useDataSaver) dataSaver.map { "$baseUrl/data-saver/$hash/$it" } else data.map { "$baseUrl/data/$hash/$it" }
-

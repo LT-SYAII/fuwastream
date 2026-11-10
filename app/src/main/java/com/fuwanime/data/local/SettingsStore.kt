@@ -73,6 +73,8 @@ internal object Keys {
     val mobileDataQuality = intPreferencesKey("mobile_data_quality")
     val updateLastCheckMs = longPreferencesKey("update_last_check_ms")
     val updateDismissedTag = stringPreferencesKey("update_dismissed_tag")
+    /** Previous Beranda visit, used for the "since you last opened" release summary. */
+    val homeLastOpenMs = longPreferencesKey("home_last_open_ms")
     /** Age confirmation is a consent record, kept when user data is wiped. */
     val ageConfirmed = booleanPreferencesKey("age_confirmed")
     val backgroundAudio = booleanPreferencesKey("background_audio")
@@ -150,6 +152,12 @@ class SettingsStore(private val context: Context) {
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { it.toSettings() }
 
+    /** Timestamp of the previous Beranda visit; null on a fresh install. */
+    suspend fun lastHomeOpen(): Long? = context.dataStore.data.first()[Keys.homeLastOpenMs]
+
+    suspend fun markHomeOpened(now: Long = System.currentTimeMillis()) =
+        context.dataStore.edit { it[Keys.homeLastOpenMs] = now }
+
     /** False until the user confirms they are 13+ on the first launch. */
     val ageConfirmed: Flow<Boolean> = context.dataStore.data.map { it[Keys.ageConfirmed] ?: false }
 
@@ -215,6 +223,14 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setNotifyBaseline(animeId: String, episode: Double) {
         context.dataStore.edit { it[doublePreferencesKey("notify_baseline_$animeId")] = episode }
+    }
+
+    /** Newest episode already auto-downloaded for one anime, independent of the notification mode. */
+    suspend fun episodeDownloadBaseline(animeId: String): Double? =
+        context.dataStore.data.map { it[doublePreferencesKey("download_baseline_$animeId")] }.firstOrNull()
+
+    suspend fun setEpisodeDownloadBaseline(animeId: String, episode: Double) {
+        context.dataStore.edit { it[doublePreferencesKey("download_baseline_$animeId")] = episode }
     }
 
     /** Newest episode already notified from the global ongoing-anime feed (per-anime key). */

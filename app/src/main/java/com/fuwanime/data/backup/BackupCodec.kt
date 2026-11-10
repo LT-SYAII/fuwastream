@@ -6,6 +6,7 @@ import com.fuwanime.data.local.MangaHistoryEntity
 import com.fuwanime.data.local.SearchHistoryEntity
 import com.fuwanime.data.local.WatchDailyEntity
 import com.fuwanime.data.local.WatchHistoryEntity
+import com.fuwanime.data.local.ContentPreferenceEntity
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 
@@ -25,6 +26,7 @@ data class BackupFile(
     val settings: List<SettingEntry>,
     val mangaFavorites: List<MangaFavoriteEntity> = emptyList(),
     val mangaHistory: List<MangaHistoryEntity> = emptyList(),
+    val contentPreferences: List<ContentPreferenceEntity> = emptyList(),
 )
 
 sealed interface BackupResult {
@@ -38,7 +40,7 @@ sealed interface BackupResult {
 internal data class BackupHeader(val format: Int?, val app: String?)
 
 object BackupCodec {
-    const val FORMAT = 2
+    const val FORMAT = 3
     const val APP = "fuwanime"
     const val FILE_NAME = "fuwanime-backup.json"
 
@@ -60,9 +62,9 @@ object BackupCodec {
 
 /** Bookkeeping keys that describe this install, not the user's choices, stay out of the backup. */
 fun isBackedUpSetting(key: String): Boolean =
-    key != "update_last_check_ms" && key != "update_dismissed_tag" &&
+    key != "update_last_check_ms" && key != "update_dismissed_tag" && key != "home_last_open_ms" &&
         !key.startsWith("notify_baseline_") && !key.startsWith("notify_release_") &&
-        !key.startsWith("notify_manga_") && !key.startsWith("backup_")
+        !key.startsWith("notify_manga_") && !key.startsWith("download_baseline_") && !key.startsWith("backup_")
 
 /**
  * A backup already in the folder is only replaced once this install has adopted the folder (restored from it, or
