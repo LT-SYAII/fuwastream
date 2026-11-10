@@ -22,6 +22,7 @@
     <string name="ux_notify_all">Every new release</string>
     <string name="ux_notify_final">Final episode only</string>
     <string name="ux_notify_off">Do not notify</string>
+    <string name="ux_notify_blocked">Android notifications are blocked. Allow permission or enable the notification channel so reminders can appear.</string>
     <string name="ux_auto_download">Automatically download new releases</string>
     <string name="ux_auto_download_limit">Keep up to %1$d releases</string>
     <string name="ux_hide_continue">Hide from Continue</string>

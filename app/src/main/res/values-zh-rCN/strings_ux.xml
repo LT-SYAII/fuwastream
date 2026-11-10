@@ -22,6 +22,7 @@
     <string name="ux_notify_all">每次新发布</string>
     <string name="ux_notify_final">仅最终集</string>
     <string name="ux_notify_off">不通知</string>
+    <string name="ux_notify_blocked">Android 通知已被阻止。请允许通知权限或开启通知渠道，以便显示提醒。</string>
     <string name="ux_auto_download">自动下载新发布</string>
     <string name="ux_auto_download_limit">最多保留 %1$d 个发布</string>
     <string name="ux_hide_continue">从继续中隐藏</string>

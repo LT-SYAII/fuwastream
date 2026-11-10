@@ -22,6 +22,7 @@
     <string name="ux_notify_all">Setiap keluaran baharu</string>
     <string name="ux_notify_final">Episod akhir sahaja</string>
     <string name="ux_notify_off">Jangan beri pemberitahuan</string>
+    <string name="ux_notify_blocked">Pemberitahuan Android disekat. Benarkan atau hidupkan saluran pemberitahuan supaya peringatan boleh muncul.</string>
     <string name="ux_auto_download">Muat turun keluaran baharu secara automatik</string>
     <string name="ux_auto_download_limit">Simpan maksimum %1$d keluaran</string>
     <string name="ux_hide_continue">Sembunyikan daripada Teruskan</string>

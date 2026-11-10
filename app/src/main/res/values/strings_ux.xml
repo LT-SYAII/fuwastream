@@ -22,6 +22,7 @@
     <string name="ux_notify_all">Setiap rilis baru</string>
     <string name="ux_notify_final">Hanya episode final</string>
     <string name="ux_notify_off">Jangan beri notifikasi</string>
+    <string name="ux_notify_blocked">Notifikasi Android diblokir. Aktifkan izin atau saluran notifikasi agar pengingat bisa muncul.</string>
     <string name="ux_auto_download">Download otomatis rilis baru</string>
     <string name="ux_auto_download_limit">Simpan maksimal %1$d rilis</string>
     <string name="ux_hide_continue">Sembunyikan dari Lanjutkan</string>
