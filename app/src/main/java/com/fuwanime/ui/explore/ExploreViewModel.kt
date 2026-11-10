@@ -9,9 +9,13 @@ import com.fuwanime.data.Anime
 import com.fuwanime.data.AnimeRepository
 import com.fuwanime.data.LibraryRepository
 import com.fuwanime.data.SortOrder
+import com.fuwanime.data.manga.Manga
+import com.fuwanime.data.manga.MangaOrder
+import com.fuwanime.data.manga.MangaRepository
 import com.fuwanime.data.remote.AnimeApiService
 import com.fuwanime.util.UiText
 import com.fuwanime.util.friendlyText
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,11 +65,15 @@ data class ExploreUiState(
     val loadingMore: Boolean = false,
     val endReached: Boolean = false,
     val error: UiText? = null,
+    /** Universal search: manga hits shown next to the anime results. */
+    val mangaResults: List<Manga> = emptyList(),
+    val mangaLoading: Boolean = false,
 )
 
 class ExploreViewModel(
     private val repo: AnimeRepository,
     private val library: LibraryRepository,
+    private val mangaRepository: MangaRepository,
     savedState: SavedStateHandle,
 ) : ViewModel() {
 
@@ -82,6 +90,7 @@ class ExploreViewModel(
     private var nextPage = 0
     private var loadJob: Job? = null
     private var debounceJob: Job? = null
+    private var mangaJob: Job? = null
 
     init {
         reload()
@@ -129,6 +138,38 @@ class ExploreViewModel(
         nextPage = 0
         _state.update { it.copy(results = emptyList(), loading = true, endReached = false, error = null) }
         loadMore()
+        searchManga(_state.value.filters.query)
+    }
+
+    /** Universal search: anime and manga in one query, without waiting for the anime pager to finish. */
+    private fun searchManga(query: String) {
+        mangaJob?.cancel()
+        val q = query.trim()
+        if (q.length < 2) {
+            _state.update { it.copy(mangaResults = emptyList(), mangaLoading = false) }
+            return
+        }
+        mangaJob = viewModelScope.launch {
+            _state.update { it.copy(mangaLoading = true) }
+            // runCatching would also swallow cancellation, letting a slow old query overwrite newer hits.
+            val local = try {
+                mangaRepository.searchIndonesia(q)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                emptyList()
+            }
+            val dex = try {
+                mangaRepository.browse(MangaOrder.RELEVANCE, q).items
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                emptyList()
+            }
+            // Different sources give the same title different ids; keep the first (local) hit per title.
+            val merged = (local + dex).distinctBy { it.id }.distinctBy { it.title.trim().lowercase() }.take(12)
+            _state.update { it.copy(mangaResults = merged, mangaLoading = false) }
+        }
     }
 
     fun loadMore() {

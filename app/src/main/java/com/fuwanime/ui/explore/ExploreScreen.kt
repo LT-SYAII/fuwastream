@@ -97,6 +97,8 @@ import com.fuwanime.ui.components.MessageState
 import com.fuwanime.ui.components.PosterCard
 import com.fuwanime.ui.components.PosterSkeleton
 import com.fuwanime.ui.components.TagChip
+import com.fuwanime.ui.manga.mangaStatusLabel
+import com.fuwanime.ui.manga.toPoster
 import com.fuwanime.ui.motion.Motion
 import com.fuwanime.ui.motion.OpenAnime
 import com.fuwanime.ui.motion.rememberStaggerState
@@ -112,11 +114,11 @@ val AllGenres = listOf(
 )
 
 @Composable
-fun ExploreRoute(focusSearch: Boolean, onAnimeClick: OpenAnime) {
-    val vm: ExploreViewModel = fuwaViewModel { c, h -> ExploreViewModel(c.animeRepository, c.libraryRepository, h) }
+fun ExploreRoute(focusSearch: Boolean, onAnimeClick: OpenAnime, onMangaClick: (String) -> Unit) {
+    val vm: ExploreViewModel = fuwaViewModel { c, h -> ExploreViewModel(c.animeRepository, c.libraryRepository, c.mangaRepository, h) }
     val state by vm.state.collectAsStateWithLifecycle()
     val recent by vm.recentSearches.collectAsStateWithLifecycle()
-    ExploreScreen(state, recent, focusSearch, vm, onAnimeClick)
+    ExploreScreen(state, recent, focusSearch, vm, onAnimeClick, onMangaClick)
 }
 
 @Composable
@@ -126,6 +128,7 @@ private fun ExploreScreen(
     focusSearch: Boolean,
     vm: ExploreViewModel,
     onAnimeClick: OpenAnime,
+    onMangaClick: (String) -> Unit,
 ) {
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -163,7 +166,7 @@ private fun ExploreScreen(
                 onClear = { vm.clearRecent() },
             )
         } else {
-            ResultsGrid(state, vm, onAnimeClick, topPad = headerDp)
+            ResultsGrid(state, vm, onAnimeClick, onMangaClick, topPad = headerDp)
         }
     Column(
         Modifier
@@ -179,7 +182,7 @@ private fun ExploreScreen(
         OutlinedTextField(
             value = state.filters.query,
             onValueChange = vm::onQueryChange,
-            placeholder = { Text(stringResource(R.string.browse_search_hint)) },
+            placeholder = { Text(stringResource(R.string.ux_search_all)) },
             leadingIcon = { Icon(Icons.Rounded.Search, null) },
             trailingIcon = {
                 if (state.filters.query.isNotEmpty()) {
@@ -335,8 +338,15 @@ private fun MenuLabel(text: String) {
 }
 
 @Composable
-private fun ResultsGrid(state: ExploreUiState, vm: ExploreViewModel, onAnimeClick: OpenAnime, topPad: Dp) {
+private fun ResultsGrid(
+    state: ExploreUiState,
+    vm: ExploreViewModel,
+    onAnimeClick: OpenAnime,
+    onMangaClick: (String) -> Unit,
+    topPad: Dp,
+) {
     val stagger = rememberStaggerState()
+    val mangaCaption = mangaStatusLabel()
     val gridState = rememberLazyGridState()
     val nearEnd by remember {
         derivedStateOf {
@@ -349,9 +359,9 @@ private fun ResultsGrid(state: ExploreUiState, vm: ExploreViewModel, onAnimeClic
     }
 
     val branch = when {
-        state.loading && state.results.isEmpty() -> ResultsBranch.LOADING
-        state.error != null && state.results.isEmpty() -> ResultsBranch.ERROR
-        state.results.isEmpty() && !state.loadingMore -> ResultsBranch.EMPTY
+        state.loading && state.results.isEmpty() && state.mangaResults.isEmpty() -> ResultsBranch.LOADING
+        state.error != null && state.results.isEmpty() && state.mangaResults.isEmpty() -> ResultsBranch.ERROR
+        state.results.isEmpty() && state.mangaResults.isEmpty() && !state.loadingMore && !state.mangaLoading -> ResultsBranch.EMPTY
         else -> ResultsBranch.RESULTS
     }
     Crossfade(branch, animationSpec = tween(Motion.Medium), label = "exploreResults") { shown ->
@@ -381,6 +391,34 @@ private fun ResultsGrid(state: ExploreUiState, vm: ExploreViewModel, onAnimeClic
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            if (state.mangaResults.isNotEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }, key = "manga-header") {
+                    Text(
+                        stringResource(R.string.manga_tab),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+                    )
+                }
+                items(state.mangaResults, key = { "manga-" + it.id }) { manga ->
+                    PosterCard(
+                        manga.toPoster(),
+                        onClick = { onMangaClick(manga.id) },
+                        modifier = Modifier.animateItem(),
+                        caption = mangaCaption(manga.status),
+                    )
+                }
+            }
+            if (state.mangaResults.isNotEmpty() && state.results.isNotEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }, key = "anime-header") {
+                    Text(
+                        stringResource(R.string.browse_all_anime),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
+                    )
+                }
+            }
             itemsIndexed(state.results, key = { _, a -> a.id }) { index, anime ->
                 PosterCard(
                     anime,
@@ -388,6 +426,13 @@ private fun ResultsGrid(state: ExploreUiState, vm: ExploreViewModel, onAnimeClic
                     modifier = Modifier.animateItem().staggerIn(stagger, anime.id, index),
                     sharedOrigin = "explore",
                 )
+            }
+            if (state.mangaLoading) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                    }
+                }
             }
             if (state.loadingMore || (!state.endReached && state.error == null)) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
