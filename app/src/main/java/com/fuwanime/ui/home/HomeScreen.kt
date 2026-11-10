@@ -3,9 +3,10 @@ package com.fuwanime.ui.home
 import com.fuwanime.R
 import androidx.compose.ui.res.stringResource
 import com.fuwanime.ui.settings.rememberRestoreFlow
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.rounded.Restore
-import android.widget.Toast
+import com.fuwanime.ui.components.FuwaSnackbarHost
 import com.fuwanime.ui.components.IconWithTooltip
 import androidx.compose.foundation.layout.heightIn
 import com.fuwanime.ui.components.LocalNavBarPadding
@@ -63,6 +64,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.fuwanime.ui.theme.PlusJakarta
@@ -72,6 +74,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.platform.LocalDensity
@@ -151,32 +154,39 @@ fun HomeRoute(
     val favoriteIds by vm.favoriteIds.collectAsStateWithLifecycle()
     val showRestore by vm.showRestorePrompt.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.onOpened() }
-    val context = LocalContext.current
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     val restore = rememberRestoreFlow(
         vm.backup,
         onRestored = { vm.dismissRestorePrompt() },
-        onMessage = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() },
+        onMessage = { message -> scope.launch { snackbar.showSnackbar(message) } },
     )
-    HomeScreen(
-        state = state,
-        favoriteIds = favoriteIds,
-        onToggleFavorite = vm::toggleFavorite,
-        todayLabel = stringResource(vm.today.full),
-        onRefresh = vm::refresh,
-        update = update,
-        onDismissUpdate = vm::dismissUpdate,
-        showRestore = showRestore,
-        onRestore = restore,
-        onDismissRestore = { vm.dismissRestorePrompt() },
-        onAnimeClick = onAnimeClick,
-        onContinue = onContinue,
-        onMangaContinue = onMangaContinue,
-        onHideContinue = vm::hideFromContinue,
-        onSearch = onSearch,
-        onSettings = onSettings,
-        onSchedule = onSchedule,
-        onExplore = onExplore,
-    )
+    Box(Modifier.fillMaxSize()) {
+        HomeScreen(
+            state = state,
+            favoriteIds = favoriteIds,
+            onToggleFavorite = vm::toggleFavorite,
+            todayLabel = stringResource(vm.today.full),
+            onRefresh = vm::refresh,
+            update = update,
+            onDismissUpdate = vm::dismissUpdate,
+            showRestore = showRestore,
+            onRestore = restore,
+            onDismissRestore = { vm.dismissRestorePrompt() },
+            onAnimeClick = onAnimeClick,
+            onContinue = onContinue,
+            onMangaContinue = onMangaContinue,
+            onHideContinue = vm::hideFromContinue,
+            onSearch = onSearch,
+            onSettings = onSettings,
+            onSchedule = onSchedule,
+            onExplore = onExplore,
+        )
+        FuwaSnackbarHost(
+            snackbar,
+            Modifier.align(Alignment.BottomCenter).padding(bottom = LocalNavBarPadding.current),
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
