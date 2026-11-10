@@ -43,8 +43,13 @@ jobs:
       - name: Decode signing keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        if: env.KEYSTORE_BASE64 != ''
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
+            echo "::error::Release signing secrets are missing. Set KEYSTORE_BASE64, KEYSTORE_PASSWORD and KEY_ALIAS."
+            exit 1
+          fi
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
           echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
 
@@ -56,14 +61,24 @@ jobs:
             echo "VERSION_NAME=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           else
             # Builds from main are named after the latest release tag, e.g. 2.1.0-build.14.
-            BASE=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v2.0.0)
+            BASE=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v2.1.0)
             echo "VERSION_NAME=${BASE#v}-build.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
           fi
 
       - name: Build APK + AAB
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: gradle testDebugUnitTest assembleRelease bundleRelease --stacktrace
+
+      - name: Verify release signing certificate
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          CERT=$("$APKSIGNER" verify --print-certs app/build/outputs/apk/release/*.apk \
+            | grep 'Signer #1 certificate SHA-256 digest' | head -1 | awk '{print $NF}' | tr -d ':' | tr 'A-F' 'a-f')
+          echo "APK signing certificate SHA-256: $CERT"
+          # Pinned to the permanent FuwaStream keystore so an update never ships with another key.
+          test "$CERT" = "1cdbc56c56c6dba68fbf74c0dde37b428b6fa9ec57fe6ee1316fd70083767544"
 
       - name: Rename artifacts
         run: |

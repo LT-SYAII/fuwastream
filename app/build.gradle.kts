@@ -6,8 +6,19 @@ plugins {
 }
 
 // CI injects the release keystore through these env vars (see .github/workflows/build.yml).
-// Without them, release falls back to the debug key so local builds still work.
+// Release builds never fall back to the debug key: a different certificate would break in-place updates.
 val releaseKeystore = System.getenv("KEYSTORE_PATH")?.let { file(it) }?.takeIf { it.exists() }
+val releasePassword = System.getenv("KEYSTORE_PASSWORD")
+val releaseAlias = System.getenv("KEY_ALIAS") ?: "fuwanime"
+// Only packaging tasks need signing. Match real task names so values like
+// `--tests com.fuwanime.MangaReleaseMappingTest` never trigger the release check.
+val buildingRelease = gradle.startParameter.taskNames.any { it.substringAfterLast(':').endsWith("Release") }
+if (buildingRelease && (releaseKeystore == null || releasePassword.isNullOrBlank())) {
+  throw GradleException(
+    "Release signing is not configured. Set KEYSTORE_PATH, KEYSTORE_PASSWORD and KEY_ALIAS " +
+      "to the permanent FuwaStream keystore before building a release.",
+  )
+}
 
 android {
   namespace = "com.fuwanime"
@@ -21,19 +32,19 @@ android {
     targetSdk = 37
     // F-Droid & CI pass VERSION_CODE/VERSION_NAME as env vars. Fallback to fixed
     // values when not set (deterministic, not epoch minutes).
-    versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 2
-    versionName = System.getenv("VERSION_NAME") ?: "2.0.0"
+    versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 3
+    versionName = System.getenv("VERSION_NAME") ?: "2.1.0"
     // The in-app update checker looks at the repo this APK was built from (a fork checks its own releases).
-    buildConfigField("String", "UPDATE_REPO", "\"${System.getenv("GITHUB_REPOSITORY") ?: "fuwanime/fuwastream"}\"")
+    buildConfigField("String", "UPDATE_REPO", "\"${System.getenv("GITHUB_REPOSITORY") ?: "LT-SYAII/fuwastream"}\"")
   }
 
   signingConfigs {
-    if (releaseKeystore != null) {
+    if (releaseKeystore != null && !releasePassword.isNullOrBlank()) {
       create("release") {
         storeFile = releaseKeystore
-        storePassword = System.getenv("KEYSTORE_PASSWORD")
-        keyAlias = System.getenv("KEY_ALIAS") ?: "fuwanime"
-        keyPassword = System.getenv("KEYSTORE_PASSWORD")
+        storePassword = releasePassword
+        keyAlias = releaseAlias
+        keyPassword = releasePassword
       }
     }
   }
@@ -43,7 +54,7 @@ android {
       isMinifyEnabled = true
       isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+      signingConfig = signingConfigs.findByName("release")
     }
     debug {
       applicationIdSuffix = ".debug"
