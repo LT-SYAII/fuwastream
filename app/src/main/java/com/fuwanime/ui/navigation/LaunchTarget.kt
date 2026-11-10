@@ -11,6 +11,8 @@ sealed interface LaunchTarget {
     data object Search : LaunchTarget
     data object Schedule : LaunchTarget
     data class Resume(val episodeId: String) : LaunchTarget
+    data class Episode(val animeId: String, val episodeId: String, val number: String) : LaunchTarget
+    data class MangaChapter(val mangaId: String, val chapterId: String) : LaunchTarget
 }
 
 const val TAB_EXPLORE_SEARCH = "explore_search"
@@ -22,8 +24,13 @@ fun parseLaunchTarget(
     tab: String?,
     resumeEpisodeId: String?,
     mangaId: String? = null,
+    episodeId: String? = null,
+    episodeNumber: String? = null,
+    chapterId: String? = null,
 ): LaunchTarget? {
     resumeEpisodeId?.takeIf { it.isNotBlank() }?.let { return LaunchTarget.Resume(it) }
+    if (!animeId.isNullOrBlank() && !episodeId.isNullOrBlank()) return LaunchTarget.Episode(animeId, episodeId, episodeNumber.orEmpty())
+    if (!mangaId.isNullOrBlank() && !chapterId.isNullOrBlank()) return LaunchTarget.MangaChapter(mangaId, chapterId)
     animeId?.takeIf { it.isNotBlank() }?.let { return LaunchTarget.Anime(it) }
     mangaId?.takeIf { it.isNotBlank() }?.let { return LaunchTarget.Manga(it) }
     return when (tab) {

@@ -20,8 +20,10 @@ import androidx.work.WorkerParameters
 import com.fuwanime.FuwaApp
 import com.fuwanime.MainActivity
 import com.fuwanime.R
+import com.fuwanime.data.Anime
 import com.fuwanime.data.Episode
 import com.fuwanime.data.local.FavoriteEntity
+import com.fuwanime.data.local.TitleNotifyMode
 import com.fuwanime.util.localizedContext
 import android.content.res.Resources
 import kotlinx.coroutines.flow.first
@@ -36,26 +38,60 @@ class EpisodeNotifyWorker(context: Context, params: WorkerParameters) : Coroutin
 
     override suspend fun doWork(): Result {
         val container = (applicationContext as FuwaApp).container
-        val settings = container.settingsStore
-        if (!settings.settings.first().notifyNewEpisodes) return Result.success()
-
-        val favorites = container.libraryRepository.allFavorites()
-            .filter { it.status.equals("ONGOING", true) }
-            .take(25)
+        val prefs = container.settingsStore.settings.first()
+        val favorites = container.libraryRepository.allFavorites().take(50)
         val notifier = EpisodeNotifier(applicationContext)
         val notified = mutableListOf<String>()
         for (fav in favorites) {
             runCatching {
+                val preference = container.libraryRepository.titlePreferenceValue("ANIME", fav.animeId)
+                val mode = preference?.notifyMode
+                    ?.let { raw -> TitleNotifyMode.entries.firstOrNull { it.name == raw } }
+                    ?: TitleNotifyMode.DEFAULT
+                val autoDownload = preference?.autoDownload == true
+                val notifyEnabled = when (mode) {
+                    TitleNotifyMode.OFF -> false
+                    TitleNotifyMode.ALL, TitleNotifyMode.FINAL_ONLY -> true
+                    TitleNotifyMode.DEFAULT -> prefs.notifyNewEpisodes
+                }
+                if (!notifyEnabled && !autoDownload) return@runCatching
+                // Skip finished shows before spending a request, except FINAL_ONLY which must see
+                // the finished detail once to announce the last episode.
+                val ongoing = fav.status.equals("ONGOING", true)
+                if (!ongoing && mode != TitleNotifyMode.FINAL_ONLY && !autoDownload) return@runCatching
+
                 val newest = container.animeRepository
                     .episodePage(fav.animeId, 0).getOrNull()
                     ?.maxByOrNull { it.sortKey } ?: return@runCatching
                 if (newest.sortKey == Double.MAX_VALUE) return@runCatching
 
-                val baseline = settings.notifyBaseline(fav.animeId)
-                settings.setNotifyBaseline(fav.animeId, newest.sortKey)
-                if (baseline != null && newest.sortKey > baseline + 0.001) {
+                val finalOnly = mode == TitleNotifyMode.FINAL_ONLY
+                if (!finalOnly && !fav.status.equals("ONGOING", true)) return@runCatching
+                val finished = if (finalOnly) {
+                    container.animeRepository.detail(fav.animeId).getOrNull()?.isOngoing == false
+                } else true
+
+                val baseline = container.settingsStore.notifyBaseline(fav.animeId)
+                // FINAL_ONLY keeps the notification baseline open until the show ends, so the last
+                // episode is still announced once. Auto-download keeps its own baseline, otherwise the
+                // held notification baseline would download the same episode on every run.
+                container.settingsStore.setNotifyBaseline(fav.animeId, if (finalOnly && !finished) 0.0 else newest.sortKey)
+                val downloadBaseline = container.settingsStore.episodeDownloadBaseline(fav.animeId)
+                if (autoDownload) container.settingsStore.setEpisodeDownloadBaseline(fav.animeId, newest.sortKey)
+                val shouldNotify = baseline != null && newest.sortKey > baseline + 0.001
+                val shouldDownload = autoDownload && downloadBaseline != null && newest.sortKey > downloadBaseline + 0.001
+                if (shouldNotify && notifyEnabled && finished) {
                     notifier.notifyNewEpisode(fav, newest)
                     notified += fav.title
+                }
+                if (shouldDownload) {
+                    val anime = Anime(
+                        id = fav.animeId, title = fav.title, poster = fav.poster, cover = fav.cover,
+                        type = fav.type, status = fav.status, year = fav.year,
+                        genres = fav.genres.split(',').map { it.trim() }.filter { it.isNotEmpty() },
+                    )
+                    container.downloadRepository
+                        .download(anime, newest, prefs.downloadQuality, prefs.downloadWifiOnly)
                 }
             }
         }
@@ -98,10 +134,20 @@ class EpisodeNotifier(private val context: Context) {
         poster = favorite.poster,
         cover = favorite.cover,
         text = res.getString(R.string.system_new_episode_text, episode.number),
+        episodeId = episode.id,
+        episodeNumber = episode.number,
     )
 
     /** Posts a "new episode" notification for any anime (favourites and the global release feed). */
-    suspend fun notifyAnime(animeId: String, title: String, poster: String, cover: String, text: String) {
+    suspend fun notifyAnime(
+        animeId: String,
+        title: String,
+        poster: String,
+        cover: String,
+        text: String,
+        episodeId: String? = null,
+        episodeNumber: String = "",
+    ) {
         if (!ready()) return
 
         val contentIntent = PendingIntent.getActivity(
@@ -109,6 +155,8 @@ class EpisodeNotifier(private val context: Context) {
             animeId.hashCode(),
             Intent(context, MainActivity::class.java).apply {
                 putExtra(MainActivity.EXTRA_OPEN_ANIME_ID, animeId)
+                episodeId?.let { putExtra(MainActivity.EXTRA_OPEN_EPISODE_ID, it) }
+                putExtra(MainActivity.EXTRA_OPEN_EPISODE_NUMBER, episodeNumber)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
@@ -125,6 +173,7 @@ class EpisodeNotifier(private val context: Context) {
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
             .setGroup(GROUP_KEY)
+            .addAction(0, res.getString(R.string.system_action_watch), contentIntent)
             .apply {
                 if (posterBitmap != null) setLargeIcon(posterBitmap)
                 if (coverBitmap != null) {

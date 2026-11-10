@@ -22,8 +22,8 @@ class MangaNotifier(private val context: Context) {
         res.getString(R.string.system_channel_new_chapters_desc),
     )
 
-    /** [chapterLabel] is the display form ("12.5"); the tap opens the manga's detail screen. */
-    fun notifyNewChapter(mangaId: String, title: String, chapterLabel: String) {
+    /** [chapterLabel] is the display form ("12.5"); the tap opens that chapter in the reader. */
+    fun notifyNewChapter(mangaId: String, title: String, chapterId: String, chapterLabel: String) {
         if (!ready()) return
 
         val contentIntent = PendingIntent.getActivity(
@@ -31,6 +31,7 @@ class MangaNotifier(private val context: Context) {
             mangaId.hashCode(),
             Intent(context, MainActivity::class.java).apply {
                 putExtra(MainActivity.EXTRA_OPEN_MANGA_ID, mangaId)
+                putExtra(MainActivity.EXTRA_OPEN_CHAPTER_ID, chapterId)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
@@ -44,6 +45,7 @@ class MangaNotifier(private val context: Context) {
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
             .setGroup(GROUP_KEY)
+            .addAction(0, res.getString(R.string.system_action_read), contentIntent)
             .build()
         manager.notify(mangaId.hashCode(), notification)
     }

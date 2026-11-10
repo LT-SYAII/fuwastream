@@ -8,6 +8,8 @@
     <string name="system_channel_new_chapters_name">Chapter baru</string>
     <string name="system_channel_new_chapters_desc">Notifikasi chapter baru untuk manga yang sedang berjalan</string>
     <string name="system_new_chapter_text">Chapter %1$s baru!</string>
+    <string name="system_action_watch">Tonton</string>
+    <string name="system_action_read">Baca</string>
     <plurals name="system_new_chapters_summary">
         <item quantity="other">%1$d chapter baru</item>
     </plurals>
