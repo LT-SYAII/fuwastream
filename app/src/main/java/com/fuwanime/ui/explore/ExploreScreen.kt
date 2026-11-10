@@ -359,9 +359,9 @@ private fun ResultsGrid(
     }
 
     val branch = when {
-        state.loading && state.results.isEmpty() && state.mangaResults.isEmpty() -> ResultsBranch.LOADING
-        state.error != null && state.results.isEmpty() && state.mangaResults.isEmpty() -> ResultsBranch.ERROR
-        state.results.isEmpty() && state.mangaResults.isEmpty() && !state.loadingMore && !state.mangaLoading -> ResultsBranch.EMPTY
+        state.loading && state.results.isEmpty() && state.mangaResults.isEmpty() && state.kuramanimeResults.isEmpty() -> ResultsBranch.LOADING
+        state.error != null && state.results.isEmpty() && state.mangaResults.isEmpty() && state.kuramanimeResults.isEmpty() -> ResultsBranch.ERROR
+        state.results.isEmpty() && state.mangaResults.isEmpty() && state.kuramanimeResults.isEmpty() && !state.loadingMore && !state.mangaLoading && !state.kuramanimeLoading -> ResultsBranch.EMPTY
         else -> ResultsBranch.RESULTS
     }
     Crossfade(branch, animationSpec = tween(Motion.Medium), label = "exploreResults") { shown ->
@@ -391,13 +391,31 @@ private fun ResultsGrid(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            if (state.kuramanimeResults.isNotEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }, key = "kr-header") {
+                    Text(
+                        stringResource(R.string.source_kuramanime),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+                    )
+                }
+                items(state.kuramanimeResults, key = { "kr-" + it.id }) { anime ->
+                    PosterCard(
+                        anime,
+                        onClick = { onAnimeClick(anime, "explore") },
+                        modifier = Modifier.animateItem(),
+                        sharedOrigin = "explore",
+                    )
+                }
+            }
             if (state.mangaResults.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }, key = "manga-header") {
                     Text(
                         stringResource(R.string.manga_tab),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+                        modifier = Modifier.padding(top = if (state.kuramanimeResults.isNotEmpty()) 8.dp else 4.dp, bottom = 2.dp),
                     )
                 }
                 items(state.mangaResults, key = { "manga-" + it.id }) { manga ->
@@ -409,7 +427,7 @@ private fun ResultsGrid(
                     )
                 }
             }
-            if (state.mangaResults.isNotEmpty() && state.results.isNotEmpty()) {
+            if ((state.mangaResults.isNotEmpty() || state.kuramanimeResults.isNotEmpty()) && state.results.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }, key = "anime-header") {
                     Text(
                         stringResource(R.string.browse_all_anime),
@@ -427,7 +445,7 @@ private fun ResultsGrid(
                     sharedOrigin = "explore",
                 )
             }
-            if (state.mangaLoading) {
+            if (state.mangaLoading || state.kuramanimeLoading) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)

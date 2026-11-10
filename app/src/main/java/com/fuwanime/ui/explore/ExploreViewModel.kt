@@ -68,6 +68,9 @@ data class ExploreUiState(
     /** Universal search: manga hits shown next to the anime results. */
     val mangaResults: List<Manga> = emptyList(),
     val mangaLoading: Boolean = false,
+    /** Additive anime source (Kuramanime) shown as a separate section. */
+    val kuramanimeResults: List<Anime> = emptyList(),
+    val kuramanimeLoading: Boolean = false,
 )
 
 class ExploreViewModel(
@@ -91,6 +94,7 @@ class ExploreViewModel(
     private var loadJob: Job? = null
     private var debounceJob: Job? = null
     private var mangaJob: Job? = null
+    private var kuramanimeJob: Job? = null
 
     init {
         reload()
@@ -136,9 +140,10 @@ class ExploreViewModel(
         raw.clear()
         seen.clear()
         nextPage = 0
-        _state.update { it.copy(results = emptyList(), loading = true, endReached = false, error = null) }
+        _state.update { it.copy(results = emptyList(), loading = true, endReached = false, error = null, kuramanimeResults = emptyList()) }
         loadMore()
         searchManga(_state.value.filters.query)
+        searchKuramanime(_state.value.filters.query)
     }
 
     /** Universal search: anime and manga in one query, without waiting for the anime pager to finish. */
@@ -169,6 +174,24 @@ class ExploreViewModel(
             // Different sources give the same title different ids; keep the first (local) hit per title.
             val merged = (local + dex).distinctBy { it.id }.distinctBy { it.title.trim().lowercase() }.take(12)
             _state.update { it.copy(mangaResults = merged, mangaLoading = false) }
+        }
+    }
+
+    /** Kuramanime as an additive anime source: search when typing, popular browse when query is empty. */
+    private fun searchKuramanime(query: String) {
+        kuramanimeJob?.cancel()
+        val q = query.trim()
+        kuramanimeJob = viewModelScope.launch {
+            _state.update { it.copy(kuramanimeLoading = true) }
+            val result = try {
+                if (q.length >= 2) repo.kuramanimeSearch(q) else repo.kuramanimeBrowse("popular", 1)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+            val items = result.getOrDefault(emptyList()).take(if (q.length >= 2) 30 else 18)
+            _state.update { it.copy(kuramanimeResults = items, kuramanimeLoading = false) }
         }
     }
 
