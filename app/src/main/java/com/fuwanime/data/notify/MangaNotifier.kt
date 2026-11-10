@@ -39,7 +39,7 @@ class MangaNotifier(private val context: Context) {
 
         val text = res.getString(R.string.system_new_chapter_text, chapterLabel)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_fuwa)
             .setContentTitle(title)
             .setContentText(text)
             .setAutoCancel(true)
@@ -55,7 +55,7 @@ class MangaNotifier(private val context: Context) {
         if (!ready()) return
         val style = NotificationCompat.InboxStyle().also { inbox -> titles.forEach { inbox.addLine(it) } }
         val summary = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_fuwa)
             .setContentTitle(chapterSummaryTitle(res, titles.size))
             .setContentText(titles.joinToString(", "))
             .setStyle(style)

@@ -12,8 +12,12 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -56,8 +60,13 @@ class EpisodeNotifyWorker(context: Context, params: WorkerParameters) : Coroutin
                 }
                 if (!notifyEnabled && !autoDownload) return@runCatching
                 // Skip finished shows before spending a request, except FINAL_ONLY which must see
-                // the finished detail once to announce the last episode.
-                val ongoing = fav.status.equals("ONGOING", true)
+                // the finished detail once to announce the last episode. Old favourites may carry
+                // a blank status, so resolve those from the detail endpoint instead of dropping them.
+                val ongoing = if (fav.status.isNotBlank()) {
+                    fav.status.equals("ONGOING", true)
+                } else {
+                    container.animeRepository.detail(fav.animeId).getOrNull()?.isOngoing == true
+                }
                 if (!ongoing && mode != TitleNotifyMode.FINAL_ONLY && !autoDownload) return@runCatching
 
                 val newest = container.animeRepository
@@ -66,7 +75,7 @@ class EpisodeNotifyWorker(context: Context, params: WorkerParameters) : Coroutin
                 if (newest.sortKey == Double.MAX_VALUE) return@runCatching
 
                 val finalOnly = mode == TitleNotifyMode.FINAL_ONLY
-                if (!finalOnly && !fav.status.equals("ONGOING", true)) return@runCatching
+                if (!finalOnly && !ongoing) return@runCatching
                 val finished = if (finalOnly) {
                     container.animeRepository.detail(fav.animeId).getOrNull()?.isOngoing == false
                 } else true
@@ -104,10 +113,24 @@ class EpisodeNotifyWorker(context: Context, params: WorkerParameters) : Coroutin
 
         /** Schedules the daily-ish sweep; safe to call on every app start (KEEP policy). */
         fun schedule(context: Context) {
-            val request = PeriodicWorkRequestBuilder<EpisodeNotifyWorker>(6, TimeUnit.HOURS).build()
+            val request = PeriodicWorkRequestBuilder<EpisodeNotifyWorker>(6, TimeUnit.HOURS)
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 WORK_NAME,
                 ExistingPeriodicWorkPolicy.KEEP,
+                request,
+            )
+        }
+
+        /** Runs a check immediately from the notification settings screen. */
+        fun runNow(context: Context) {
+            val request = OneTimeWorkRequestBuilder<EpisodeNotifyWorker>()
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                "${WORK_NAME}_now",
+                ExistingWorkPolicy.KEEP,
                 request,
             )
         }
@@ -138,6 +161,28 @@ class EpisodeNotifier(private val context: Context) {
         episodeNumber = episode.number,
     )
 
+    /** Posts a local test notification; false when permission or the channel blocks it. */
+    fun notifyTest(): Boolean {
+        if (!ready()) return false
+        val contentIntent = PendingIntent.getActivity(
+            context,
+            TEST_ID,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_fuwa)
+            .setContentTitle(res.getString(R.string.app_name))
+            .setContentText(res.getString(R.string.mine_notify_test_body))
+            .setAutoCancel(true)
+            .setContentIntent(contentIntent)
+            .build()
+        manager.notify(TEST_ID, notification)
+        return true
+    }
+
     /** Posts a "new episode" notification for any anime (favourites and the global release feed). */
     suspend fun notifyAnime(
         animeId: String,
@@ -167,7 +212,7 @@ class EpisodeNotifier(private val context: Context) {
         val coverBitmap = loadBitmap(context, cover.ifBlank { poster }, 1024)
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_fuwa)
             .setContentTitle(title)
             .setContentText(text)
             .setAutoCancel(true)
@@ -189,7 +234,7 @@ class EpisodeNotifier(private val context: Context) {
         if (!ready()) return
         val style = NotificationCompat.InboxStyle().also { inbox -> titles.forEach { inbox.addLine(it) } }
         val summary = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_fuwa)
             .setContentTitle(groupSummaryTitle(res, titles.size))
             .setContentText(titles.joinToString(", "))
             .setStyle(style)
@@ -204,6 +249,7 @@ class EpisodeNotifier(private val context: Context) {
         const val CHANNEL_ID = "new_episodes"
         const val GROUP_KEY = "new_episodes"
         const val SUMMARY_ID = 0x5EED
+        const val TEST_ID = 0x7E57
     }
 }
 
@@ -231,6 +277,9 @@ fun ensureChannel(
         PackageManager.PERMISSION_GRANTED
     ) return false
     if (Build.VERSION.SDK_INT >= 26) {
+        // createNotificationChannel never overrides a user's choice, so an existing channel
+        // with importance NONE means the user (or an OEM) disabled it: posting would be a no-op.
+        if (manager.getNotificationChannel(channelId)?.importance == NotificationManager.IMPORTANCE_NONE) return false
         manager.createNotificationChannel(
             NotificationChannel(channelId, name, NotificationManager.IMPORTANCE_DEFAULT).apply { this.description = description },
         )
