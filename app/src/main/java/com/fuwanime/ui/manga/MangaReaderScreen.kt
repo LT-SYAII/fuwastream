@@ -27,6 +27,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.Slider
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Refresh
@@ -39,6 +42,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -52,8 +56,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -83,6 +90,7 @@ import com.fuwanime.data.manga.MangaChapter
 import com.fuwanime.data.manga.MangaDownloadRepository
 import com.fuwanime.data.manga.MangaStatus
 import com.fuwanime.data.local.MangaDownloadState
+import com.fuwanime.data.local.ReaderMode
 import com.fuwanime.data.manga.mergeChapters
 import com.fuwanime.data.manga.readerLanguage
 import com.fuwanime.data.manga.withChapter
@@ -101,7 +109,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
@@ -142,6 +154,10 @@ class MangaReaderViewModel(
 ) : ViewModel() {
     private val _state = MutableStateFlow(ReaderState())
     val state: StateFlow<ReaderState> = _state.asStateFlow()
+
+    val readerMode: StateFlow<ReaderMode> = library.preference(mangaId).map { pref ->
+        pref?.readerMode?.let { raw -> ReaderMode.entries.firstOrNull { it.name == raw } } ?: ReaderMode.WEBTOON
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReaderMode.WEBTOON)
 
     init { open(firstChapterId) }
 
@@ -196,6 +212,10 @@ class MangaReaderViewModel(
         val manga = _state.value.manga ?: return
         appScope.launch { library.saveProgress(manga, chapter, chapterLabel, page, pageCount) }
     }
+
+    fun setReaderMode(mode: ReaderMode) = viewModelScope.launch {
+        library.updatePreference(mangaId) { it.copy(readerMode = mode.name) }
+    }
 }
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -211,8 +231,11 @@ fun MangaReaderRoute(mangaId: String, chapterId: String, onBack: () -> Unit) {
         MangaReaderViewModel(mangaId, chapterId, c.mangaRepository, c.mangaLibrary, c.settingsStore, c.mangaDownloads, c.appScope)
     }
     val state by vm.state.collectAsStateWithLifecycle()
+    val readerMode by vm.readerMode.collectAsStateWithLifecycle()
     var barsVisible by rememberSaveable { mutableStateOf(true) }
     var pickerOpen by rememberSaveable { mutableStateOf(false) }
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     // Immersive reading: system bars follow the reader's own bars.
     val activity = LocalContext.current.findActivity()
@@ -234,31 +257,72 @@ fun MangaReaderRoute(mangaId: String, chapterId: String, onBack: () -> Unit) {
             chapter == null || pages == null -> CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
             else -> key(chapter.id) {
                 val label = chapterLabel(chapter)
+                // A source change can shrink the page list; never open past its last page.
+                val startPage = state.startPage.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
                 // From the start, show the credit above page 1; when resuming, jump straight to the saved page.
-                val listState = rememberLazyListState(initialFirstVisibleItemIndex = if (state.startPage == 0) 0 else state.startPage + 1)
+                val listState = rememberLazyListState(initialFirstVisibleItemIndex = if (startPage == 0) 0 else startPage + 1)
+                val pagerState = rememberPagerState(initialPage = startPage) { pages.size }
                 // External (official-site) chapters can't be shown here, so prev/next skip them.
                 val readable = remember(state.chapters) { state.chapters.filter { it.externalUrl == null && it.pages > 0 } }
                 val next = nextChapter(readable, chapter.id)
                 val previous = previousChapter(readable, chapter.id)
-                val currentPage by remember {
-                    derivedStateOf { (listState.firstVisibleItemIndex - 1).coerceIn(0, (pages.size - 1).coerceAtLeast(0)) }
+                val currentPage by remember(readerMode, pages.size) {
+                    derivedStateOf {
+                        if (readerMode == ReaderMode.WEBTOON) {
+                            (listState.firstVisibleItemIndex - 1).coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+                        } else pagerState.currentPage
+                    }
                 }
-                LaunchedEffect(Unit) {
+                // Switching mode keeps the reader on the same page instead of jumping back to the start.
+                var lastPage by remember { mutableIntStateOf(startPage) }
+                var modeInitialized by remember { mutableStateOf(false) }
+                LaunchedEffect(readerMode) {
+                    // The first composition already starts at the saved page; only a real mode
+                    // change needs to carry the page across layouts.
+                    if (modeInitialized) {
+                        if (readerMode == ReaderMode.WEBTOON) listState.scrollToItem(lastPage + 1)
+                        else pagerState.scrollToPage(lastPage)
+                    }
+                    modeInitialized = true
+                    snapshotFlow {
+                        if (readerMode == ReaderMode.WEBTOON) {
+                            (listState.firstVisibleItemIndex - 1).coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+                        } else pagerState.currentPage
+                    }.drop(1).collect { lastPage = it }
+                }
+                LaunchedEffect(chapter.id, readerMode) {
                     snapshotFlow { currentPage }.distinctUntilChanged().debounce(1_000).collect { vm.saveProgress(chapter, it, pages.size, label) }
                 }
-                DisposableEffect(Unit) { onDispose { vm.saveProgress(chapter, currentPage, pages.size, label) } }
+                // The debounce may not fire when the reader closes quickly, so save the latest page on exit.
+                val latestPage by rememberUpdatedState(currentPage)
+                DisposableEffect(Unit) { onDispose { vm.saveProgress(chapter, latestPage, pages.size, label) } }
 
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize().clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) { barsVisible = !barsVisible },
-                ) {
-                    item(key = "credit-top") { Credit(chapter, Modifier.statusBarsPadding().padding(top = 56.dp, bottom = 8.dp)) }
-                    itemsIndexed(pages, key = { i, _ -> "${chapter.id}-$i" }) { i, url -> Page(url, i, state.generation, vm::refreshPages) }
-                    item(key = "end") {
-                        EndCard(label, chapter, next, onNext = { next?.let { vm.open(it.id) } })
+                if (readerMode == ReaderMode.WEBTOON) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize().clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { barsVisible = !barsVisible },
+                    ) {
+                        item(key = "credit-top") { Credit(chapter, Modifier.statusBarsPadding().padding(top = 56.dp, bottom = 8.dp)) }
+                        itemsIndexed(pages, key = { i, _ -> "${chapter.id}-$i" }) { i, url -> Page(url, i, state.generation, vm::refreshPages) }
+                        item(key = "end") { EndCard(label, chapter, next, onNext = { next?.let { vm.open(it.id) } }) }
+                    }
+                } else {
+                    HorizontalPager(
+                        state = pagerState,
+                        reverseLayout = readerMode == ReaderMode.RIGHT_TO_LEFT,
+                        modifier = Modifier.fillMaxSize(),
+                        key = { "${chapter.id}-$it" },
+                    ) { page ->
+                        Box(
+                            Modifier.fillMaxSize().clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                            ) { barsVisible = !barsVisible },
+                            contentAlignment = Alignment.Center,
+                        ) { ReaderPage(pages[page], page, state.generation, vm::refreshPages) }
                     }
                 }
 
@@ -285,14 +349,15 @@ fun MangaReaderRoute(mangaId: String, chapterId: String, onBack: () -> Unit) {
                         IconButton(onClick = { next?.let { vm.open(it.id) } }, enabled = next != null) {
                             Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, stringResource(R.string.manga_reader_next), tint = if (next != null) Color.White else Color.White.copy(alpha = 0.3f))
                         }
+                        IconButton(onClick = { settingsOpen = true }) {
+                            Icon(Icons.Rounded.Settings, stringResource(R.string.ux_reader_settings), tint = Color.White)
+                        }
                     }
                 }
                 if (pickerOpen) ChapterPicker(readable, chapter.id, onPick = { pickerOpen = false; if (it != chapter.id) vm.open(it) }, onDismiss = { pickerOpen = false })
                 AnimatedVisibility(barsVisible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
-                    Row(
-                        Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.75f)).navigationBarsPadding().padding(4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+                    Column(Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.75f)).navigationBarsPadding().padding(4.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { previous?.let { vm.open(it.id) } }, enabled = previous != null) {
                             Icon(Icons.Rounded.SkipPrevious, stringResource(R.string.manga_reader_prev), tint = if (previous != null) Color.White else Color.White.copy(alpha = 0.3f))
                         }
@@ -306,7 +371,23 @@ fun MangaReaderRoute(mangaId: String, chapterId: String, onBack: () -> Unit) {
                             Icon(Icons.Rounded.SkipNext, stringResource(R.string.manga_reader_next), tint = if (next != null) Color.White else Color.White.copy(alpha = 0.3f))
                         }
                     }
+                    if (pages.size > 1) {
+                        Slider(
+                            value = currentPage.toFloat(),
+                            onValueChange = { page ->
+                                scope.launch {
+                                    if (readerMode == ReaderMode.WEBTOON) listState.scrollToItem(page.toInt() + 1)
+                                    else pagerState.scrollToPage(page.toInt())
+                                }
+                            },
+                            valueRange = 0f..(pages.size - 1).toFloat(),
+                            steps = (pages.size - 2).coerceAtLeast(0),
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                        )
+                    }
+                    }
                 }
+                if (settingsOpen) ReaderSettingsSheet(readerMode, vm::setReaderMode) { settingsOpen = false }
             }
         }
         // Loading and error states have no reader bar; keep a way out.
@@ -393,6 +474,49 @@ private fun Page(url: String, index: Int, generation: Int, onFailed: () -> Unit)
             }
             is AsyncImagePainter.State.Success -> Unit
             else -> CircularProgressIndicator(color = Color.White.copy(alpha = 0.6f))
+        }
+    }
+}
+
+@Composable
+private fun ReaderPage(url: String, index: Int, generation: Int, onFailed: () -> Unit) {
+    var status by remember(url, generation) { mutableStateOf<AsyncImagePainter.State?>(null) }
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        key(generation) {
+            AsyncImage(
+                model = url,
+                contentDescription = stringResource(R.string.manga_reader_page_cd, index + 1),
+                contentScale = ContentScale.Fit,
+                onState = { status = it },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        when (status) {
+            is AsyncImagePainter.State.Error -> TextButton(onClick = onFailed) { Text(stringResource(R.string.manga_reader_reload), color = Color.White) }
+            is AsyncImagePainter.State.Success -> Unit
+            else -> CircularProgressIndicator(color = Color.White.copy(alpha = 0.6f))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReaderSettingsSheet(selected: ReaderMode, onSelect: (ReaderMode) -> Unit, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Text(stringResource(R.string.ux_reader_mode), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(20.dp))
+        ReaderMode.entries.forEach { mode ->
+            val label = when (mode) {
+                ReaderMode.WEBTOON -> R.string.ux_reader_webtoon
+                ReaderMode.SINGLE_PAGE -> R.string.ux_reader_single
+                ReaderMode.RIGHT_TO_LEFT -> R.string.ux_reader_rtl
+            }
+            Row(
+                Modifier.fillMaxWidth().clickable { onSelect(mode); onDismiss() }.padding(horizontal = 20.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(stringResource(label), modifier = Modifier.weight(1f))
+                if (mode == selected) Icon(Icons.Rounded.Check, null, tint = MaterialTheme.colorScheme.primary)
+            }
         }
     }
 }
