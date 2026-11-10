@@ -60,8 +60,10 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             echo "VERSION_NAME=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           else
-            # Builds from main are named after the latest release tag, e.g. 2.1.0-build.14.
-            BASE=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v2.1.0)
+            # Builds from main are named after the latest stable release tag, e.g. 2.1.0-build.14.
+            # Ignore prerelease tags such as v2.0.0-build.1 so the name never nests build suffixes.
+            BASE=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+            [ -n "$BASE" ] || BASE=v2.1.0
             echo "VERSION_NAME=${BASE#v}-build.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
           fi
 
@@ -74,9 +76,14 @@ jobs:
       - name: Verify release signing certificate
         run: |
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
-          CERT=$("$APKSIGNER" verify --print-certs app/build/outputs/apk/release/*.apk \
-            | grep 'Signer #1 certificate SHA-256 digest' | head -1 | awk '{print $NF}' | tr -d ':' | tr 'A-F' 'a-f')
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          "$APKSIGNER" verify --print-certs "$APK" | tee "$RUNNER_TEMP/apksigner.txt"
+          # build-tools 35 and older print "Signer #1 certificate SHA-256 digest:",
+          # while newer versions print "V2 Signer: certificate SHA-256 digest:".
+          CERT=$(grep 'certificate SHA-256 digest' "$RUNNER_TEMP/apksigner.txt" \
+            | head -1 | awk '{print $NF}' | tr -d ':' | tr 'A-F' 'a-f')
           echo "APK signing certificate SHA-256: $CERT"
+          test -n "$CERT"
           # Pinned to the permanent FuwaStream keystore so an update never ships with another key.
           test "$CERT" = "1cdbc56c56c6dba68fbf74c0dde37b428b6fa9ec57fe6ee1316fd70083767544"
 
