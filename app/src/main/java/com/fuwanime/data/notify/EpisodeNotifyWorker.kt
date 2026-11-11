@@ -60,17 +60,23 @@ class EpisodeNotifyWorker(context: Context, params: WorkerParameters) : Coroutin
                 }
                 if (!notifyEnabled && !autoDownload) return@runCatching
                 // Skip finished shows before spending a request, except FINAL_ONLY which must see
-                // the finished detail once to announce the last episode. Old favourites may carry
-                // a blank status, so resolve those from the detail endpoint instead of dropping them.
-                val ongoing = if (fav.status.isNotBlank()) {
-                    fav.status.equals("ONGOING", true)
-                } else {
-                    container.animeRepository.detail(fav.animeId).getOrNull()?.isOngoing == true
+                // the finished detail once to announce the last episode. Old favourites may carry a
+                // blank status, and an upcoming title keeps that status in the library after it starts
+                // airing, so resolve both from the detail endpoint instead of dropping them.
+                val ongoing = when {
+                    fav.status.equals("ONGOING", true) -> true
+                    fav.status.isBlank() ||
+                        fav.status.equals("UPCOMING", true) ||
+                        fav.status.equals("NOT_YET_AIRED", true) ->
+                        container.animeRepository.detail(fav.animeId).getOrNull()?.isOngoing == true
+                    else -> false
                 }
                 if (!ongoing && mode != TitleNotifyMode.FINAL_ONLY && !autoDownload) return@runCatching
 
+                // Always hit the network here: the repository caches episode pages for the UI, and a
+                // long-lived process would otherwise keep comparing against the same stale episode.
                 val newest = container.animeRepository
-                    .episodePage(fav.animeId, 0).getOrNull()
+                    .episodePage(fav.animeId, 0, forceRefresh = true).getOrNull()
                     ?.maxByOrNull { it.sortKey } ?: return@runCatching
                 if (newest.sortKey == Double.MAX_VALUE) return@runCatching
 
