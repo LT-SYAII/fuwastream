@@ -296,6 +296,17 @@ fun SettingsRoute(onBack: () -> Unit, onOpenLegal: (String) -> Unit) {
                 }
             }
 
+            item { Group(stringResource(R.string.mine_group_content)) }
+            item {
+                val mature by vm.store.matureContent.collectAsStateWithLifecycle(false)
+                SwitchRow(
+                    Icons.Rounded.Explicit,
+                    stringResource(R.string.manga_settings_mature),
+                    stringResource(R.string.manga_settings_mature_desc),
+                    mature,
+                ) { vm.update { setMatureContent(it) } }
+            }
+
             item { Group(stringResource(R.string.mine_group_player)) }
             item {
                 ChoiceRow(Icons.Rounded.HighQuality, stringResource(R.string.mine_default_quality), listOf(360, 480, 720, 1080), s.preferredQuality, { "${it}p" }) {
@@ -462,13 +473,6 @@ fun SettingsRoute(onBack: () -> Unit, onOpenLegal: (String) -> Unit) {
                     vm.update { setMangaDataSaver(it) }
                 }
             }
-            item {
-                val mature by vm.store.mangaMature.collectAsStateWithLifecycle(false)
-                SwitchRow(Icons.Rounded.Explicit, stringResource(R.string.manga_settings_mature), stringResource(R.string.manga_settings_mature_desc), mature) {
-                    vm.update { setMangaMature(it) }
-                }
-            }
-
             item { Group(stringResource(R.string.mine_group_backup)) }
             backupPrefs?.let { b ->
                 item {

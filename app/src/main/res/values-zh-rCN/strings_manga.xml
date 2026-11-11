@@ -51,7 +51,7 @@
     <string name="manga_reader_source_shinigami">来源：Shinigami</string>
     <string name="manga_home_komiku">经典与完结</string>
     <string name="manga_settings_mature">成人内容</string>
-    <string name="manga_settings_mature_desc">显示来自 MangaDex 的成人题材漫画（如《烙印战士》《浪客行》）</string>
+    <string name="manga_settings_mature_desc">显示成人类型动画（Ecchi、Erotica、Hentai）以及 MangaDex 的成人题材漫画</string>
     <string name="manga_credit_komiku">数据与图片来自 Komiku</string>
     <string name="manga_reader_source_komiku">来源：Komiku</string>
     <string name="manga_home_genres">按类型浏览</string>

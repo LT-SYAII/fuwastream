@@ -52,7 +52,7 @@
     <string name="manga_reader_source_shinigami">Source: Shinigami</string>
     <string name="manga_home_komiku">Classics &amp; complete</string>
     <string name="manga_settings_mature">Mature content</string>
-    <string name="manga_settings_mature_desc">Show mature-themed manga (e.g. Berserk, Vagabond) from MangaDex</string>
+    <string name="manga_settings_mature_desc">Show anime with mature genres (Ecchi, Erotica, Hentai) and mature-themed manga from MangaDex</string>
     <string name="manga_credit_komiku">Data &amp; images from Komiku</string>
     <string name="manga_reader_source_komiku">Source: Komiku</string>
     <string name="manga_home_genres">Browse genres</string>

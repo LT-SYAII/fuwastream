@@ -196,9 +196,12 @@ class SettingsStore(private val context: Context) {
     val mangaDataSaver: Flow<Boolean> = context.dataStore.data.map { it[Keys.mangaDataSaver] ?: false }
     suspend fun setMangaDataSaver(enabled: Boolean) = context.dataStore.edit { it[Keys.mangaDataSaver] = enabled }
 
-    /** Also list MangaDex titles rated "erotica" (mature themes such as Berserk); pornographic titles are never shown. */
-    val mangaMature: Flow<Boolean> = context.dataStore.data.map { it[Keys.mangaMature] ?: false }
-    suspend fun setMangaMature(enabled: Boolean) = context.dataStore.edit { it[Keys.mangaMature] = enabled }
+    /**
+     * Global mature-content switch. The existing `manga_mature` storage key is retained so users and backups keep
+     * their preference; it now also controls explicit anime genres (Ecchi/Erotica/Hentai).
+     */
+    val matureContent: Flow<Boolean> = context.dataStore.data.map { it[Keys.mangaMature] ?: false }
+    suspend fun setMatureContent(enabled: Boolean) = context.dataStore.edit { it[Keys.mangaMature] = enabled }
 
     /** Opening marked by the user for an anime; the same range applies to all its episodes. */
     fun opMark(animeId: String): Flow<OpMark?> = context.dataStore.data.map { prefs ->

@@ -65,6 +65,7 @@
     <string name="mine_recap_watch_time">Watch time</string>
     <string name="mine_recap_favorite">Favorite: %1$s</string>
     <string name="mine_group_display">Display</string>
+    <string name="mine_group_content">Content</string>
     <string name="mine_group_player">Player</string>
     <string name="mine_group_notifications">Notifications</string>
     <string name="mine_group_downloads">Downloads</string>

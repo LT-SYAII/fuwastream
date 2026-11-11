@@ -63,15 +63,16 @@ class AppContainer(private val app: Application) {
         runCatching { Cache(app.cacheDir.resolve("api_cache"), 50L * 1024 * 1024) }.getOrNull(),
         networkStatus,
     )
+    private val database = FuwaDatabase.create(app)
+    val settingsStore = SettingsStore(app)
     val animeRepository = AnimeRepository(
         AnimeApiService.create(apiHttpClient),
         AnimeApiService.create(apiHttpClient.newBuilder().addInterceptor(ForceCache).build()),
-        kuramanime = KuramanimeSource(httpClient),
+        kuramanime = KuramanimeSource(httpClient, mature = { settingsStore.matureContent.first() }),
+        mature = { settingsStore.matureContent.first() },
     )
-    private val database = FuwaDatabase.create(app)
     val libraryRepository = LibraryRepository(database)
     val mangaLibrary = MangaLibrary(database)
-    val settingsStore = SettingsStore(app)
 
     /** For writes that must outlive the screen that started them (e.g. saving progress on exit). */
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -128,7 +129,7 @@ class AppContainer(private val app: Application) {
             appLanguage = { app.resources.configuration.locales[0].language },
             shinigami = ShinigamiSource(ShinigamiApi.create(mangaHttpClient)),
             komiku = KomikuSource(mangaHttpClient),
-            mature = { settingsStore.mangaMature.first() },
+            mature = { settingsStore.matureContent.first() },
         )
     }
 

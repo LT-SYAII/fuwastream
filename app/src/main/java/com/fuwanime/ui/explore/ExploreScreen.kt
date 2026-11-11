@@ -91,6 +91,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fuwanime.data.SortOrder
+import com.fuwanime.data.MATURE_ANIME_GENRES
 import com.fuwanime.ui.components.ErrorState
 import com.fuwanime.ui.components.LocalNavBarPadding
 import com.fuwanime.ui.components.MessageState
@@ -106,25 +107,32 @@ import com.fuwanime.ui.motion.staggerIn
 import com.fuwanime.util.fuwaViewModel
 import kotlin.math.roundToInt
 
-val AllGenres = listOf(
+private val GeneralAnimeGenres = listOf(
     "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Isekai", "Romance", "School",
     "Slice of Life", "Supernatural", "Mystery", "Psychological", "Sci-Fi", "Mecha", "Sports",
     "Magic", "Super Power", "Martial Arts", "Historical", "Military", "Seinen", "Shounen",
     "Shoujo", "Harem", "Horror", "Thriller", "Game", "Parody", "Demons",
 )
 
+fun availableAnimeGenres(matureContent: Boolean): List<String> =
+    if (matureContent) GeneralAnimeGenres + MATURE_ANIME_GENRES else GeneralAnimeGenres
+
 @Composable
 fun ExploreRoute(focusSearch: Boolean, onAnimeClick: OpenAnime, onMangaClick: (String) -> Unit) {
-    val vm: ExploreViewModel = fuwaViewModel { c, h -> ExploreViewModel(c.animeRepository, c.libraryRepository, c.mangaRepository, h) }
+    val vm: ExploreViewModel = fuwaViewModel { c, h ->
+        ExploreViewModel(c.animeRepository, c.libraryRepository, c.mangaRepository, c.settingsStore, h)
+    }
     val state by vm.state.collectAsStateWithLifecycle()
     val recent by vm.recentSearches.collectAsStateWithLifecycle()
-    ExploreScreen(state, recent, focusSearch, vm, onAnimeClick, onMangaClick)
+    val matureContent by vm.matureContent.collectAsStateWithLifecycle()
+    ExploreScreen(state, recent, matureContent, focusSearch, vm, onAnimeClick, onMangaClick)
 }
 
 @Composable
 private fun ExploreScreen(
     state: ExploreUiState,
     recent: List<String>,
+    matureContent: Boolean,
     focusSearch: Boolean,
     vm: ExploreViewModel,
     onAnimeClick: OpenAnime,
@@ -211,7 +219,7 @@ private fun ExploreScreen(
 
         if (!showRecent) {
             Spacer(Modifier.height(14.dp))
-            FilterBar(state.filters, vm)
+            FilterBar(state.filters, matureContent, vm)
             ResultsHeader(state.filters, vm, onRandom = state.results.takeIf { it.isNotEmpty() }?.let { r -> { pickRandom(r)?.let { onAnimeClick(it, "explore") } } })
         }
     }
@@ -244,7 +252,7 @@ private fun RecentSearches(items: List<String>, topPad: Dp, onPick: (String) -> 
 }
 
 @Composable
-private fun FilterBar(filters: ExploreFilters, vm: ExploreViewModel) {
+private fun FilterBar(filters: ExploreFilters, matureContent: Boolean, vm: ExploreViewModel) {
     // One row: the genre picker (a sheet) then the content types, instead of a second endless row of genres.
     var genresOpen by remember { mutableStateOf(false) }
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -255,7 +263,7 @@ private fun FilterBar(filters: ExploreFilters, vm: ExploreViewModel) {
     }
     if (genresOpen) {
         GenreSheet(
-            genres = AllGenres.map { it to it },
+            genres = availableAnimeGenres(matureContent).map { it to it },
             selected = filters.genres,
             onToggle = vm::toggleGenre,
             onClear = { filters.genres.forEach(vm::toggleGenre) },

@@ -213,6 +213,13 @@ class HomeViewModel(
                 if (shouldAutoRefresh(feed.value)) load(refreshing = false)
             }
         }
+        viewModelScope.launch {
+            settingsStore.matureContent.distinctUntilChanged().drop(1).collect {
+                // Rebuild both anime and MangaDex shelves immediately when the global content filter changes.
+                load(refreshing = false)
+                loadMangaReleases()
+            }
+        }
     }
 
     fun refresh() {

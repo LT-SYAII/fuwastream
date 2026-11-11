@@ -9,6 +9,8 @@ import com.fuwanime.data.Anime
 import com.fuwanime.data.AnimeRepository
 import com.fuwanime.data.LibraryRepository
 import com.fuwanime.data.SortOrder
+import com.fuwanime.data.isMatureAnimeGenre
+import com.fuwanime.data.local.SettingsStore
 import com.fuwanime.data.manga.Manga
 import com.fuwanime.data.manga.MangaOrder
 import com.fuwanime.data.manga.MangaRepository
@@ -22,6 +24,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -75,6 +79,7 @@ class ExploreViewModel(
     private val repo: AnimeRepository,
     private val library: LibraryRepository,
     private val mangaRepository: MangaRepository,
+    private val settingsStore: SettingsStore,
     savedState: SavedStateHandle,
 ) : ViewModel() {
 
@@ -85,6 +90,9 @@ class ExploreViewModel(
 
     val recentSearches: StateFlow<List<String>> =
         library.recentSearches.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val matureContent: StateFlow<Boolean> =
+        settingsStore.matureContent.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private val raw = mutableListOf<Anime>()
     private val seen = HashSet<String>()
@@ -97,6 +105,16 @@ class ExploreViewModel(
 
     init {
         reload()
+        viewModelScope.launch {
+            settingsStore.matureContent.distinctUntilChanged().drop(1).collect { enabled ->
+                if (!enabled) {
+                    _state.update { s ->
+                        s.copy(filters = s.filters.copy(genres = s.filters.genres.filterNot(::isMatureAnimeGenre).toSet()))
+                    }
+                }
+                reload()
+            }
+        }
     }
 
     fun onQueryChange(query: String) {

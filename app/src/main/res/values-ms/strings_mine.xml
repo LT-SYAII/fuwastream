@@ -65,6 +65,7 @@
     <string name="mine_recap_watch_time">Masa menonton</string>
     <string name="mine_recap_favorite">Paling suka: %1$s</string>
     <string name="mine_group_display">Paparan</string>
+    <string name="mine_group_content">Kandungan</string>
     <string name="mine_group_player">Pemain</string>
     <string name="mine_group_notifications">Pemberitahuan</string>
     <string name="mine_group_downloads">Muat turun</string>

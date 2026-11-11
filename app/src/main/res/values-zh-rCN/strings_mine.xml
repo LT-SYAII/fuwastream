@@ -65,6 +65,7 @@
     <string name="mine_recap_watch_time">观看时长</string>
     <string name="mine_recap_favorite">最爱：%1$s</string>
     <string name="mine_group_display">显示</string>
+    <string name="mine_group_content">内容</string>
     <string name="mine_group_player">播放器</string>
     <string name="mine_group_notifications">通知</string>
     <string name="mine_group_downloads">下载</string>

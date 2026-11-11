@@ -54,6 +54,7 @@ import com.fuwanime.ui.motion.OpenAnime
 import com.fuwanime.data.Anime
 import com.fuwanime.data.AnimeRepository
 import com.fuwanime.data.LibraryRepository
+import com.fuwanime.data.local.SettingsStore
 import com.fuwanime.ui.components.ErrorState
 import com.fuwanime.ui.components.MessageState
 import com.fuwanime.ui.components.NetImage
@@ -70,6 +71,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -82,7 +85,11 @@ data class DaySchedule(
     val error: UiText? = null,
 )
 
-class ScheduleViewModel(private val repo: AnimeRepository, library: LibraryRepository) : ViewModel() {
+class ScheduleViewModel(
+    private val repo: AnimeRepository,
+    library: LibraryRepository,
+    settingsStore: SettingsStore,
+) : ViewModel() {
     private val _days = MutableStateFlow(Day.entries.associateWith { DaySchedule() })
     val days: StateFlow<Map<Day, DaySchedule>> = _days.asStateFlow()
 
@@ -90,6 +97,16 @@ class ScheduleViewModel(private val repo: AnimeRepository, library: LibraryRepos
     val favoriteIds: StateFlow<Set<String>> = library.favoriteList
         .map { list -> list.mapTo(HashSet()) { it.animeId } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    init {
+        viewModelScope.launch {
+            settingsStore.matureContent.distinctUntilChanged().drop(1).collect {
+                val loaded = _days.value.filterValues { day -> day.loaded }.keys
+                _days.value = Day.entries.associateWith { DaySchedule() }
+                loaded.forEach { ensureLoaded(it) }
+            }
+        }
+    }
 
     fun ensureLoaded(day: Day, force: Boolean = false) {
         val current = _days.value.getValue(day)
@@ -113,7 +130,9 @@ class ScheduleViewModel(private val repo: AnimeRepository, library: LibraryRepos
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScheduleRoute(onAnimeClick: OpenAnime) {
-    val vm: ScheduleViewModel = fuwaViewModel { c, _ -> ScheduleViewModel(c.animeRepository, c.libraryRepository) }
+    val vm: ScheduleViewModel = fuwaViewModel { c, _ ->
+        ScheduleViewModel(c.animeRepository, c.libraryRepository, c.settingsStore)
+    }
     val days by vm.days.collectAsStateWithLifecycle()
     val favoriteIds by vm.favoriteIds.collectAsStateWithLifecycle()
     var mineOnly by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
