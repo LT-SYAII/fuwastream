@@ -94,7 +94,8 @@ class ReleaseNotifyWorker(context: Context, params: WorkerParameters) : Coroutin
 
         for (release in releases) {
             val label = release.chapter ?: continue
-            val number = label.toDoubleOrNull() ?: continue
+            // MangaDex normally sends "12.5", but some scanlations prefix it ("Chapter 12"); take the number either way.
+            val number = episodeNumber(label) ?: continue
             val preference = container.libraryRepository.titlePreferenceValue("MANGA", release.mangaId)
             val mode = preference?.notifyMode
                 ?.let { raw -> TitleNotifyMode.entries.firstOrNull { it.name == raw } }
@@ -140,9 +141,12 @@ class ReleaseNotifyWorker(context: Context, params: WorkerParameters) : Coroutin
     companion object {
         private const val WORK_NAME = "release_check"
 
-        /** How many entries of each feed to scan per run; enough to cover a day without hammering the APIs. */
-        private const val ANIME_FEED = 30
-        private const val MANGA_FEED = 40
+        /**
+         * How many entries of each feed to scan per run. Anime updates are a few dozen a day; MangaDex
+         * can publish a hundred chapters in a few hours, so its window is wider to avoid missing releases.
+         */
+        private const val ANIME_FEED = 50
+        private const val MANGA_FEED = 100
 
         /** Schedules the hourly sweep; safe to call on every app start (KEEP policy). */
         fun schedule(context: Context) {
