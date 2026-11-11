@@ -42,6 +42,8 @@ data class AppSettings(
     val notifyOngoingAnime: Boolean = true,
     /** Release notifications for any ongoing manga (MangaDex, app language). */
     val notifyNewChapters: Boolean = true,
+    /** Notify when a newer app version is published on GitHub Releases. */
+    val notifyAppUpdates: Boolean = true,
     /** Skip a marked opening without waiting for a tap. */
     val autoSkipOp: Boolean = false,
     /** Generic "+85 dtk" jump for anime whose opening is not marked yet. */
@@ -73,6 +75,8 @@ internal object Keys {
     val mobileDataQuality = intPreferencesKey("mobile_data_quality")
     val updateLastCheckMs = longPreferencesKey("update_last_check_ms")
     val updateDismissedTag = stringPreferencesKey("update_dismissed_tag")
+    val notifyAppUpdates = booleanPreferencesKey("notify_app_updates")
+    val updateNotifiedTag = stringPreferencesKey("update_notified_tag")
     /** Previous Beranda visit, used for the "since you last opened" release summary. */
     val homeLastOpenMs = longPreferencesKey("home_last_open_ms")
     /** Age confirmation is a consent record, kept when user data is wiped. */
@@ -186,6 +190,7 @@ class SettingsStore(private val context: Context) {
     suspend fun setNotifyNewEpisodes(enabled: Boolean) = context.dataStore.edit { it[Keys.notifyNewEpisodes] = enabled }
     suspend fun setNotifyOngoingAnime(enabled: Boolean) = context.dataStore.edit { it[Keys.notifyOngoingAnime] = enabled }
     suspend fun setNotifyNewChapters(enabled: Boolean) = context.dataStore.edit { it[Keys.notifyNewChapters] = enabled }
+    suspend fun setNotifyAppUpdates(enabled: Boolean) = context.dataStore.edit { it[Keys.notifyAppUpdates] = enabled }
     suspend fun setAutoSkipOp(enabled: Boolean) = context.dataStore.edit { it[Keys.autoSkipOp] = enabled }
     suspend fun setJumpAheadButton(enabled: Boolean) = context.dataStore.edit { it[Keys.jumpAheadButton] = enabled }
     suspend fun setMobileDataQuality(height: Int) = context.dataStore.edit { it[Keys.mobileDataQuality] = height }
@@ -281,6 +286,11 @@ class SettingsStore(private val context: Context) {
         context.dataStore.data.map { it[Keys.updateDismissedTag] }.firstOrNull()
 
     suspend fun dismissUpdate(tag: String) = context.dataStore.edit { it[Keys.updateDismissedTag] = tag }
+
+    suspend fun updateNotifiedTag(): String? =
+        context.dataStore.data.map { it[Keys.updateNotifiedTag] }.firstOrNull()
+
+    suspend fun setUpdateNotifiedTag(tag: String) = context.dataStore.edit { it[Keys.updateNotifiedTag] = tag }
 }
 
 internal fun Preferences.toSettings(): AppSettings {
@@ -298,6 +308,7 @@ internal fun Preferences.toSettings(): AppSettings {
         notifyNewEpisodes = this[Keys.notifyNewEpisodes] ?: d.notifyNewEpisodes,
         notifyOngoingAnime = this[Keys.notifyOngoingAnime] ?: d.notifyOngoingAnime,
         notifyNewChapters = this[Keys.notifyNewChapters] ?: d.notifyNewChapters,
+        notifyAppUpdates = this[Keys.notifyAppUpdates] ?: d.notifyAppUpdates,
         autoSkipOp = this[Keys.autoSkipOp] ?: d.autoSkipOp,
         jumpAheadButton = this[Keys.jumpAheadButton] ?: d.jumpAheadButton,
         mobileDataQuality = this[Keys.mobileDataQuality] ?: d.mobileDataQuality,

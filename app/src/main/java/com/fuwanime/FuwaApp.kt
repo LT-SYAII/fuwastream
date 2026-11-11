@@ -40,6 +40,7 @@ import com.fuwanime.data.remote.apiCacheClient
 import com.fuwanime.data.UpdateRepository
 import com.fuwanime.data.notify.EpisodeNotifyWorker
 import com.fuwanime.data.notify.ReleaseNotifyWorker
+import com.fuwanime.data.notify.AppUpdateWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

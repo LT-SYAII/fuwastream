@@ -69,6 +69,7 @@ import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.rounded.SystemUpdateAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -117,6 +118,7 @@ import com.fuwanime.data.notify.EpisodeNotifier
 import com.fuwanime.data.notify.EpisodeNotifyWorker
 import com.fuwanime.data.notify.NotificationAccess
 import com.fuwanime.data.notify.ReleaseNotifyWorker
+import com.fuwanime.data.notify.AppUpdateWorker
 import com.fuwanime.data.notify.notificationAccess
 import com.fuwanime.data.notify.openNotificationSettings
 import com.fuwanime.util.fuwaViewModel
@@ -419,6 +421,17 @@ fun SettingsRoute(onBack: () -> Unit, onOpenLegal: (String) -> Unit) {
                 }
             }
             item {
+                SwitchRow(
+                    Icons.Rounded.SystemUpdateAlt,
+                    stringResource(R.string.mine_notify_app_updates),
+                    stringResource(R.string.mine_notify_app_updates_desc),
+                    s.notifyAppUpdates,
+                ) { enabled ->
+                    if (enabled) enableNotifications { vm.update { setNotifyAppUpdates(true) } }
+                    else vm.update { setNotifyAppUpdates(false) }
+                }
+            }
+            item {
                 ActionRow(
                     Icons.Rounded.NotificationsActive,
                     stringResource(R.string.mine_notify_test),
@@ -442,6 +455,7 @@ fun SettingsRoute(onBack: () -> Unit, onOpenLegal: (String) -> Unit) {
                 ) {
                     EpisodeNotifyWorker.runNow(context)
                     ReleaseNotifyWorker.runNow(context)
+                    AppUpdateWorker.runNow(context)
                     say(res.getString(R.string.mine_notify_check_scheduled))
                 }
             }

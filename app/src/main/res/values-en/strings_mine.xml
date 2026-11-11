@@ -104,6 +104,8 @@
     <string name="mine_notify_releases_desc">New episodes from every airing anime, not just favorites</string>
     <string name="mine_notify_chapters">New manga chapter notifications</string>
     <string name="mine_notify_chapters_desc">New chapters from ongoing manga (MangaDex, app language)</string>
+    <string name="mine_notify_app_updates">App update notifications</string>
+    <string name="mine_notify_app_updates_desc">Notify when a new FuwaStream version is available (checked on app open and periodically)</string>
     <string name="mine_notify_blocked_title">Notifications blocked</string>
     <string name="mine_notify_blocked_desc">Android is blocking FuwaStream notifications. Allow them so new episodes and chapters can be announced.</string>
     <string name="mine_notify_channel_blocked_title">Notification channels are off</string>

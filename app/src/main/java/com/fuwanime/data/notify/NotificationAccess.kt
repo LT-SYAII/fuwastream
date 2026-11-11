@@ -32,7 +32,11 @@ fun notificationAccess(context: Context): NotificationAccess {
     }
     if (Build.VERSION.SDK_INT >= 26) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val blocked = listOf(EpisodeNotifier.CHANNEL_ID, MangaNotifier.CHANNEL_ID)
+        val blocked = listOf(
+            EpisodeNotifier.CHANNEL_ID,
+            MangaNotifier.CHANNEL_ID,
+            AppUpdateNotifier.CHANNEL_ID,
+        )
             .mapNotNull { manager.getNotificationChannel(it) }
             .any { it.importance == NotificationManager.IMPORTANCE_NONE }
         if (blocked) return NotificationAccess.CHANNEL_BLOCKED
