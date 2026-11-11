@@ -84,6 +84,8 @@ data class ChapterAttributesDto(
     @Json(name = "pages") val pages: Int = 0,
     @Json(name = "externalUrl") val externalUrl: String? = null,
     @Json(name = "publishAt") val publishAt: String? = null,
+    /** When the chapter actually became readable; unlike [publishAt] it is not far in the future. */
+    @Json(name = "readableAt") val readableAt: String? = null,
 )
 
 @JsonClass(generateAdapter = true)
