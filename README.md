@@ -191,6 +191,10 @@ com.fuwanime
 | **YuzakiNetwork (Haruka Fuyune)** · fuwanimereal@gmail.com | Pendiri &amp; admin proyek — brand &amp; ikon, legal &amp; kepatuhan, rilis &amp; build CI, notifikasi episode, pengecek update, anime serupa, unduhan massal, filter tipe konten |
 | **Andra** · andrahijati@gmail.com | Kolaborator &amp; kontributor — UI/UX (redesign, aksesibilitas, Statistik, Koleksi, multi-bahasa), Manga (MangaDex, Shinigami, Komiku, reader), Infrastruktur (CI &amp; QA, database &amp; backup, cache offline, DNS-over-HTTPS), Pemutar (Media3, PiP, audio latar, AniSkip) |
 
+## 🙏 Kredit
+
+Terima kasih kepada [**ayashiiiyo**](https://github.com/ayashiiiyo) yang memberikan solusi untuk memulihkan sumber [Comix](https://comix.ws) setelah situs mengubah modul dan field API-nya.
+
 ## 🤝 Kontribusi
 
 Kontribusi, ide, dan laporan masalah sangat berarti untuk FuwaStream!
