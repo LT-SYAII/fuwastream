@@ -11,7 +11,35 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ComixMappingTest {
-    @Test fun mapsBrowseItem() {
+    @Test fun mapsCurrentBrowseItem() {
+        val manga = comixManga(
+            mapOf(
+                "SZ" to "x0ynk",
+                "k_" to "Villains Are Destined to Die",
+                "nv" to "manhwa",
+                "yx" to "finished",
+                "fL" to mapOf("HS" to "/images/covers/x@280.jpg", "Tr" to "/images/covers/x.jpg"),
+                "U$" to "A villain story.",
+                "Dx" to listOf(mapOf("k_" to "Action"), mapOf("k_" to "Drama")),
+                "gS" to listOf(mapOf("k_" to "Josei")),
+                "ZN" to listOf(mapOf("k_" to "Author")),
+                "Hv" to listOf("Villains Are Destined to Die", "Alt Name"),
+                "Pi" to 2020,
+            ),
+        )
+
+        assertEquals("cx:x0ynk", manga.id)
+        assertEquals("Villains Are Destined to Die", manga.title)
+        assertEquals("https://comix.ws/images/covers/x.jpg", manga.coverUrl)
+        assertEquals(MangaStatus.COMPLETED, manga.status)
+        assertEquals(2020, manga.year)
+        assertEquals("Author", manga.author)
+        assertEquals(listOf("Alt Name"), manga.altTitles)
+        assertEquals("Manhwa", manga.type)
+        assertEquals(listOf("Action", "Drama", "Josei"), manga.tags)
+    }
+
+    @Test fun mapsLegacyBrowseItem() {
         val manga = comixManga(
             mapOf(
                 "fH" to "63057",
@@ -39,7 +67,37 @@ class ComixMappingTest {
         assertEquals(listOf("Action", "Drama"), manga.tags)
     }
 
-    @Test fun mapsChapterAndReaderPages() {
+    @Test fun mapsCurrentChapterAndReaderPages() {
+        val chapter = comixChapter(
+            mapOf(
+                "hk" to 11275751,
+                "Z_" to 164,
+                "nb" to "S4-14",
+                "aK" to "en",
+                "rk" to mapOf("nb" to "Tapas"),
+            ),
+            "63057",
+        )
+        assertEquals("cx:63057:11275751", chapter.id)
+        assertEquals("164", chapter.number)
+        assertEquals("S4-14", chapter.title)
+        assertEquals("en", chapter.language)
+        assertEquals("Tapas", chapter.group)
+        assertEquals(1, chapter.pages)
+
+        val pages = comixPageUrls(
+            mapOf(
+                "iE" to listOf(
+                    mapOf("Gh" to "https://1xx.example/a.webp"),
+                    mapOf("Gh" to "http://insecure.example/b.webp"),
+                    mapOf("Gh" to "https://1xx.example/c.webp"),
+                ),
+            ),
+        )
+        assertEquals(listOf("https://1xx.example/a.webp", "https://1xx.example/c.webp"), pages)
+    }
+
+    @Test fun mapsLegacyChapterAndReaderPages() {
         val chapter = comixChapter(
             mapOf(
                 "kM" to 11275751.0,
