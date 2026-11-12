@@ -84,6 +84,7 @@ internal object Keys {
     val backgroundAudio = booleanPreferencesKey("background_audio")
     val videoResize = stringPreferencesKey("video_resize")
     val mangaDataSaver = booleanPreferencesKey("manga_data_saver")
+    val mangaTranslate = booleanPreferencesKey("manga_translate")
     val mangaMature = booleanPreferencesKey("manga_mature")
     val backupTreeUri = stringPreferencesKey("backup_tree_uri")
     val backupAuto = booleanPreferencesKey("backup_auto")
@@ -200,6 +201,10 @@ class SettingsStore(private val context: Context) {
     /** Smaller MangaDex "data-saver" images in the reader. */
     val mangaDataSaver: Flow<Boolean> = context.dataStore.data.map { it[Keys.mangaDataSaver] ?: false }
     suspend fun setMangaDataSaver(enabled: Boolean) = context.dataStore.edit { it[Keys.mangaDataSaver] = enabled }
+
+    /** English image chapters (Comix) are translated to Indonesian on-device once the reader opts in. */
+    val mangaTranslate: Flow<Boolean> = context.dataStore.data.map { it[Keys.mangaTranslate] ?: false }
+    suspend fun setMangaTranslate(enabled: Boolean) = context.dataStore.edit { it[Keys.mangaTranslate] = enabled }
 
     /**
      * Global mature-content switch. The existing `manga_mature` storage key is retained so users and backups keep

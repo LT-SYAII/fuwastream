@@ -109,6 +109,8 @@ dependencies {
   implementation(libs.androidx.profileinstaller)
   baselineProfile(project(":baselineprofile"))
   implementation(libs.okhttp.logging)
+  implementation(libs.mlkit.translate)
+  implementation(libs.mlkit.text.recognition)
   implementation(libs.retrofit)
   implementation(libs.retrofit.converter.moshi)
   ksp(libs.androidx.room.compiler)

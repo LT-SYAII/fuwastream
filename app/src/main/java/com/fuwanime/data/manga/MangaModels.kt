@@ -146,11 +146,12 @@ fun languageGroup(language: String): ChapterLang = when (language.lowercase()) {
     else -> ChapterLang.EN
 }
 
-/** 0 Shinigami, 1 Komiku, 2 MangaDex: lower wins when several sources have the same chapter. */
+/** 0 Shinigami, 1 Komiku, 2 Comix, 3 MangaDex: lower wins when several sources have the same chapter. */
 fun sourceRank(chapterId: String): Int = when {
     chapterId.startsWith("sh:") -> 0
     chapterId.startsWith("km:") -> 1
-    else -> 2
+    chapterId.startsWith("cx:") -> 2
+    else -> 3
 }
 
 private fun MangaChapter.readable() = externalUrl == null && pages > 0

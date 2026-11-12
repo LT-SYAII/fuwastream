@@ -1,0 +1,90 @@
+package com.fuwanime
+
+import com.fuwanime.data.manga.MangaStatus
+import com.fuwanime.data.manga.comixChapter
+import com.fuwanime.data.manga.comixManga
+import com.fuwanime.data.manga.comixPageUrls
+import com.fuwanime.data.manga.sourceRank
+import com.fuwanime.data.manga.translationChunks
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ComixMappingTest {
+    @Test fun mapsBrowseItem() {
+        val manga = comixManga(
+            mapOf(
+                "fH" to "63057",
+                "rf" to "A Bona fide Killer",
+                "GR" to "manhwa",
+                "oF" to "releasing",
+                "Zs" to mapOf("QC" to "/images/covers/x@280.jpg", "sP" to "/images/covers/x.jpg"),
+                "fK" to "A killer story.",
+                "hV" to listOf(mapOf("rf" to "Action"), mapOf("rf" to "Drama")),
+                "A5" to listOf(mapOf("rf" to "Action")),
+                "uy" to listOf(mapOf("rf" to "Author")),
+                "Ga" to listOf("A Bona fide Killer", "Alt Name"),
+                "_r" to 2020.0,
+            ),
+        )
+
+        assertEquals("cx:63057", manga.id)
+        assertEquals("A Bona fide Killer", manga.title)
+        assertEquals("https://comix.ws/images/covers/x.jpg", manga.coverUrl)
+        assertEquals(MangaStatus.ONGOING, manga.status)
+        assertEquals(2020, manga.year)
+        assertEquals("Author", manga.author)
+        assertEquals(listOf("Alt Name"), manga.altTitles)
+        assertEquals("Manhwa", manga.type)
+        assertEquals(listOf("Action", "Drama"), manga.tags)
+    }
+
+    @Test fun mapsChapterAndReaderPages() {
+        val chapter = comixChapter(
+            mapOf(
+                "kM" to 11275751.0,
+                "Xn" to 164.0,
+                "f9" to "S4-14",
+                "FP" to "en",
+                "gm" to mapOf("f9" to "Tapas"),
+            ),
+            "63057",
+        )
+        assertEquals("cx:63057:11275751", chapter.id)
+        assertEquals("164", chapter.number)
+        assertEquals("en", chapter.language)
+        assertEquals("Tapas", chapter.group)
+        assertEquals(1, chapter.pages)
+
+        val pages = comixPageUrls(
+            mapOf(
+                "iT" to listOf(
+                    mapOf("H\$" to "https://1xx.example/a.webp"),
+                    mapOf("H\$" to "http://insecure.example/b.webp"),
+                    mapOf("H\$" to "https://1xx.example/c.webp"),
+                ),
+            ),
+        )
+        assertEquals(listOf("https://1xx.example/a.webp", "https://1xx.example/c.webp"), pages)
+    }
+
+    @Test fun comixOutranksMangaDexButNotIndonesianSources() {
+        assertEquals(0, sourceRank("sh:1"))
+        assertEquals(1, sourceRank("km:1"))
+        assertEquals(2, sourceRank("cx:63057:11275751"))
+        assertEquals(3, sourceRank("mangadex-id"))
+    }
+
+    @Test fun translationChunksKeepEveryLine() {
+        val text = (1..1_000).joinToString("\n") { "line $it" }
+        val chunks = translationChunks(text, limit = 200)
+        assertTrue(chunks.size > 1)
+        assertTrue(chunks.all { it.length <= 200 })
+        assertEquals(text, chunks.joinToString("\n"))
+    }
+
+    @Test fun translationChunksSplitOneLongLine() {
+        val chunks = translationChunks("x".repeat(250), limit = 100)
+        assertEquals(listOf("x".repeat(100), "x".repeat(100), "x".repeat(50)), chunks)
+    }
+}

@@ -163,6 +163,15 @@ class MangaExploreViewModel(private val repo: MangaRepository) : ViewModel() {
         }
     }
 
+    /** A failed source must not hide the others, but cancellation must still stop stale results. */
+    private suspend fun <T> quiet(block: suspend () -> T): T? = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+
     private suspend fun loadFirst(a: Applied) {
         moreJob?.cancel()
         _state.update { it.copy(results = emptyList(), total = 0, loading = true, loadingMore = false, error = null, generation = it.generation + 1, mangaDexDown = false) }
@@ -182,9 +191,11 @@ class MangaExploreViewModel(private val repo: MangaRepository) : ViewModel() {
         // With no query, a dead MangaDex still gets the Indonesian popular list instead of an empty screen.
         val indonesian = when {
             a.tags.isNotEmpty() || a.status != null -> emptyList()
-            a.q.isNotBlank() -> repo.searchIndonesia(a.q).filter { a.type == null || it.type == null || it.type.equals(a.type.label, ignoreCase = true) }
-            page == null || a.type != null -> runCatching { repo.popularIndonesia(1, a.type).items }.getOrDefault(emptyList()) +
-                runCatching { repo.popularKomiku(1, a.type).items }.getOrDefault(emptyList())
+            a.q.isNotBlank() -> (repo.searchIndonesia(a.q) + repo.searchComix(a.q))
+                .filter { a.type == null || it.type == null || it.type.equals(a.type.label, ignoreCase = true) }
+            page == null || a.type != null -> quiet { repo.popularIndonesia(1, a.type).items }.orEmpty() +
+                quiet { repo.popularKomiku(1, a.type).items }.orEmpty() +
+                quiet { repo.popularComix(1, a.type).items }.orEmpty()
             else -> emptyList()
         }
         val results = dedupeByTitle((indonesian + page?.items.orEmpty()).distinctBy { m -> m.id })

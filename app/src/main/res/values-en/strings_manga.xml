@@ -33,6 +33,15 @@
     <string name="manga_reader_scanlation_unknown">via MangaDex</string>
     <string name="manga_reader_reload">Reload image</string>
     <string name="manga_reader_page_cd">Page %1$d</string>
+    <string name="manga_reader_translate">Translate</string>
+    <string name="manga_reader_translate_title">Indonesian translation</string>
+    <string name="manga_reader_translating">Translating page…</string>
+    <string name="manga_reader_translate_model">Downloading translation model…</string>
+    <string name="manga_reader_translate_no_text">No text detected on this page.</string>
+    <string name="manga_reader_translate_failed">Translation failed. Check your connection and try again.</string>
+    <string name="manga_reader_translate_retry">Try again</string>
+    <string name="manga_reader_translate_settings">Translate to Indonesian</string>
+    <string name="manga_reader_translate_settings_desc">OCR and translation run on-device. The ~30 MB model downloads once.</string>
     <plurals name="manga_detail_chapters_count">
         <item quantity="one">%1$d chapter</item>
         <item quantity="other">%1$d chapters</item>
@@ -55,6 +64,8 @@
     <string name="manga_settings_mature_desc">Show anime with mature genres (Ecchi, Erotica, Hentai) and mature-themed manga from MangaDex</string>
     <string name="manga_credit_komiku">Data &amp; images from Komiku</string>
     <string name="manga_reader_source_komiku">Source: Komiku</string>
+    <string name="manga_credit_comix">Data &amp; images from Comix</string>
+    <string name="manga_reader_source_comix">Source: Comix</string>
     <string name="manga_home_genres">Browse genres</string>
     <string name="manga_genre_action">Action</string>
     <string name="manga_genre_romance">Romance</string>

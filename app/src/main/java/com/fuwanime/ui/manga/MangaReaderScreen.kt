@@ -1,5 +1,7 @@
 package com.fuwanime.ui.manga
 
+import com.fuwanime.data.manga.PageTranslation
+import com.fuwanime.data.manga.isComixId
 import com.fuwanime.data.manga.isKomikuId
 import com.fuwanime.data.manga.isShinigamiId
 import android.app.Activity
@@ -18,12 +20,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -40,14 +47,19 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -74,6 +86,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -96,6 +109,7 @@ import com.fuwanime.data.manga.readerLanguage
 import com.fuwanime.data.manga.withChapter
 import com.fuwanime.data.manga.MangaLibrary
 import com.fuwanime.data.manga.MangaRepository
+import com.fuwanime.data.manga.MangaTranslator
 import com.fuwanime.data.manga.nextChapter
 import com.fuwanime.data.manga.previousChapter
 import com.fuwanime.ui.components.ErrorState
@@ -103,8 +117,10 @@ import com.fuwanime.util.UiText
 import com.fuwanime.util.UiTextException
 import com.fuwanime.util.friendlyText
 import com.fuwanime.util.fuwaViewModel
+import com.fuwanime.util.text
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -114,6 +130,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
@@ -143,6 +160,18 @@ data class ReaderState(
     val generation: Int = 0,
 )
 
+/** Translation of one page while OCR/model work is still running or after it failed. */
+data class ReaderPageTranslation(
+    val translation: PageTranslation? = null,
+    val loading: Boolean = false,
+    val error: UiText? = null,
+)
+
+data class ReaderTranslationState(
+    val pages: Map<Int, ReaderPageTranslation> = emptyMap(),
+    val modelDownloading: Boolean = false,
+)
+
 class MangaReaderViewModel(
     private val mangaId: String,
     firstChapterId: String,
@@ -150,11 +179,23 @@ class MangaReaderViewModel(
     private val library: MangaLibrary,
     private val settings: SettingsStore,
     private val downloads: MangaDownloadRepository,
+    private val translator: MangaTranslator,
     /** Outlives the screen, so the save on exit isn't cancelled with viewModelScope. */
     private val appScope: kotlinx.coroutines.CoroutineScope,
 ) : ViewModel() {
     private val _state = MutableStateFlow(ReaderState())
     val state: StateFlow<ReaderState> = _state.asStateFlow()
+
+    private val _translation = MutableStateFlow(ReaderTranslationState())
+    val translation: StateFlow<ReaderTranslationState> = _translation.asStateFlow()
+
+    /** Remembered per install: once enabled, every English Comix chapter opens translated. */
+    val translationEnabled: StateFlow<Boolean> = settings.mangaTranslate
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    private val translationJobs = mutableMapOf<Int, Job>()
+    /** Number of translation jobs currently inside the one-time model download. */
+    private var modelDownloads = 0
 
     val readerMode: StateFlow<ReaderMode> = library.preference(mangaId).map { pref ->
         pref?.readerMode?.let { raw -> ReaderMode.entries.firstOrNull { it.name == raw } } ?: ReaderMode.WEBTOON
@@ -162,7 +203,7 @@ class MangaReaderViewModel(
 
     init { open(firstChapterId) }
 
-    private fun isMangaDexId(id: String) = !isShinigamiId(id) && !isKomikuId(id)
+    private fun isMangaDexId(id: String) = !isShinigamiId(id) && !isKomikuId(id) && !isComixId(id)
 
     /** A MangaDex title or merged MangaDex chapter can't load when the ISP blocks the API. */
     private fun errorText(e: Throwable, sourceId: String): UiText = when {
@@ -172,6 +213,7 @@ class MangaReaderViewModel(
     }
 
     fun open(chapterId: String) {
+        if (_state.value.requestedId != chapterId) resetTranslations()
         _state.value = _state.value.copy(chapter = null, pages = null, error = null, requestedId = chapterId)
         viewModelScope.launch {
             try {
@@ -211,6 +253,7 @@ class MangaReaderViewModel(
     /** MangaDex@Home URLs expire; a failed image asks for a fresh server. */
     fun refreshPages() {
         val chapter = _state.value.chapter ?: return
+        resetTranslations()
         viewModelScope.launch {
             try {
                 val pages = repo.pages(chapter.id, settings.mangaDataSaver.first(), forceRefresh = true)
@@ -232,6 +275,74 @@ class MangaReaderViewModel(
     fun setReaderMode(mode: ReaderMode) = viewModelScope.launch {
         library.updatePreference(mangaId) { it.copy(readerMode = mode.name) }
     }
+
+    fun setTranslationEnabled(enabled: Boolean) = viewModelScope.launch {
+        settings.setMangaTranslate(enabled)
+        if (!enabled) resetTranslations()
+    }
+
+    /** OCR + translation for one page, cached until the chapter or its image list changes. */
+    fun ensureTranslated(index: Int, url: String?) {
+        if (url.isNullOrBlank()) return
+        val current = _translation.value.pages[index]
+        if (current?.translation != null || current?.loading == true) return
+        _translation.update { it.copy(pages = it.pages + (index to ReaderPageTranslation(loading = true))) }
+        var downloading = false
+        val job = viewModelScope.launch {
+            try {
+                val result = translator.translatePage(url) {
+                    downloading = true
+                    modelDownloads++
+                    _translation.update { it.copy(modelDownloading = true) }
+                }
+                _translation.update {
+                    it.copy(
+                        pages = it.pages + (index to ReaderPageTranslation(translation = result)),
+                        modelDownloading = false,
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _translation.update {
+                    it.copy(
+                        pages = it.pages + (index to ReaderPageTranslation(error = UiText(R.string.manga_reader_translate_failed))),
+                        modelDownloading = false,
+                    )
+                }
+            } finally {
+                if (downloading) {
+                    modelDownloads = (modelDownloads - 1).coerceAtLeast(0)
+                    _translation.update { it.copy(modelDownloading = modelDownloads > 0) }
+                }
+            }
+        }
+        translationJobs[index] = job
+    }
+
+    /** Stops queued OCR for pages that scrolled away; finished translations stay cached. */
+    fun cancelPendingTranslations(keep: Set<Int>) {
+        val stale = translationJobs.filter { (index, job) -> index !in keep && job.isActive }
+        if (stale.isEmpty()) return
+        _translation.update { state ->
+            state.copy(pages = state.pages.filterKeys { it !in stale.keys })
+        }
+        for ((index, job) in stale) {
+            translationJobs.remove(index)
+            job.cancel()
+        }
+    }
+
+    fun retryTranslation(index: Int, url: String) {
+        _translation.update { it.copy(pages = it.pages - index) }
+        ensureTranslated(index, url)
+    }
+
+    private fun resetTranslations() {
+        translationJobs.values.forEach { it.cancel() }
+        translationJobs.clear()
+        _translation.value = ReaderTranslationState()
+    }
 }
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -244,10 +355,12 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 @Composable
 fun MangaReaderRoute(mangaId: String, chapterId: String, onBack: () -> Unit) {
     val vm: MangaReaderViewModel = fuwaViewModel(key = "reader-$mangaId-$chapterId") { c, _ ->
-        MangaReaderViewModel(mangaId, chapterId, c.mangaRepository, c.mangaLibrary, c.settingsStore, c.mangaDownloads, c.appScope)
+        MangaReaderViewModel(mangaId, chapterId, c.mangaRepository, c.mangaLibrary, c.settingsStore, c.mangaDownloads, c.mangaTranslator, c.appScope)
     }
     val state by vm.state.collectAsStateWithLifecycle()
     val readerMode by vm.readerMode.collectAsStateWithLifecycle()
+    val translation by vm.translation.collectAsStateWithLifecycle()
+    val translationEnabled by vm.translationEnabled.collectAsStateWithLifecycle()
     var barsVisible by rememberSaveable { mutableStateOf(true) }
     var pickerOpen by rememberSaveable { mutableStateOf(false) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
@@ -273,6 +386,7 @@ fun MangaReaderRoute(mangaId: String, chapterId: String, onBack: () -> Unit) {
             chapter == null || pages == null -> CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
             else -> key(chapter.id) {
                 val label = chapterLabel(chapter)
+                val translationAvailable = isComixId(chapter.id)
                 // A source change can shrink the page list; never open past its last page.
                 val startPage = state.startPage.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
                 // From the start, show the credit above page 1; when resuming, jump straight to the saved page.
@@ -309,6 +423,13 @@ fun MangaReaderRoute(mangaId: String, chapterId: String, onBack: () -> Unit) {
                 LaunchedEffect(chapter.id, readerMode) {
                     snapshotFlow { currentPage }.distinctUntilChanged().debounce(1_000).collect { vm.saveProgress(chapter, it, pages.size, label) }
                 }
+                // Translate only the page in view (plus the next one), never the whole 95-page chapter at once.
+                LaunchedEffect(translationEnabled, chapter.id, currentPage, state.generation) {
+                    if (!translationEnabled || !translationAvailable) return@LaunchedEffect
+                    vm.cancelPendingTranslations(setOf(currentPage, currentPage + 1))
+                    vm.ensureTranslated(currentPage, pages.getOrNull(currentPage))
+                    vm.ensureTranslated(currentPage + 1, pages.getOrNull(currentPage + 1))
+                }
                 // The debounce may not fire when the reader closes quickly, so save the latest page on exit.
                 val latestPage by rememberUpdatedState(currentPage)
                 DisposableEffect(Unit) { onDispose { vm.saveProgress(chapter, latestPage, pages.size, label) } }
@@ -322,7 +443,18 @@ fun MangaReaderRoute(mangaId: String, chapterId: String, onBack: () -> Unit) {
                         ) { barsVisible = !barsVisible },
                     ) {
                         item(key = "credit-top") { Credit(chapter, Modifier.statusBarsPadding().padding(top = 56.dp, bottom = 8.dp)) }
-                        itemsIndexed(pages, key = { i, _ -> "${chapter.id}-$i" }) { i, url -> Page(url, i, state.generation, vm::refreshPages) }
+                        itemsIndexed(pages, key = { i, _ -> "${chapter.id}-$i" }) { i, url ->
+                            Page(
+                                url = url,
+                                index = i,
+                                generation = state.generation,
+                                translation = translation.pages[i],
+                                translationEnabled = translationAvailable && translationEnabled,
+                                modelDownloading = translation.modelDownloading,
+                                onRetryTranslation = { vm.retryTranslation(i, url) },
+                                onFailed = vm::refreshPages,
+                            )
+                        }
                         item(key = "end") { EndCard(label, chapter, next, onNext = { next?.let { vm.open(it.id) } }) }
                     }
                 } else {
@@ -338,7 +470,19 @@ fun MangaReaderRoute(mangaId: String, chapterId: String, onBack: () -> Unit) {
                                 indication = null,
                             ) { barsVisible = !barsVisible },
                             contentAlignment = Alignment.Center,
-                        ) { ReaderPage(pages[page], page, state.generation, vm::refreshPages) }
+                        ) {
+                            ReaderPage(
+                                url = pages[page],
+                                index = page,
+                                generation = state.generation,
+                                translation = translation.pages[page],
+                                translationEnabled = translationAvailable && translationEnabled,
+                                modelDownloading = translation.modelDownloading,
+                                onRetryTranslation = { vm.retryTranslation(page, pages[page]) },
+                                onFailed = vm::refreshPages,
+                                bottomPadding = if (barsVisible) 96.dp else 12.dp,
+                            )
+                        }
                     }
                 }
 
@@ -365,6 +509,19 @@ fun MangaReaderRoute(mangaId: String, chapterId: String, onBack: () -> Unit) {
                         IconButton(onClick = { next?.let { vm.open(it.id) } }, enabled = next != null) {
                             Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, stringResource(R.string.manga_reader_next), tint = if (next != null) Color.White else Color.White.copy(alpha = 0.3f))
                         }
+                        if (translationAvailable) {
+                            IconButton(onClick = { vm.setTranslationEnabled(!translationEnabled) }) {
+                                if (translation.modelDownloading) {
+                                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                                } else {
+                                    Icon(
+                                        Icons.Rounded.Translate,
+                                        stringResource(R.string.manga_reader_translate),
+                                        tint = if (translationEnabled) MaterialTheme.colorScheme.primary else Color.White,
+                                    )
+                                }
+                            }
+                        }
                         IconButton(onClick = { settingsOpen = true }) {
                             Icon(Icons.Rounded.Settings, stringResource(R.string.ux_reader_settings), tint = Color.White)
                         }
@@ -373,6 +530,12 @@ fun MangaReaderRoute(mangaId: String, chapterId: String, onBack: () -> Unit) {
                 if (pickerOpen) ChapterPicker(readable, chapter.id, onPick = { pickerOpen = false; if (it != chapter.id) vm.open(it) }, onDismiss = { pickerOpen = false })
                 AnimatedVisibility(barsVisible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
                     Column(Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.75f)).navigationBarsPadding().padding(4.dp)) {
+                    if (translationAvailable && !translationEnabled) {
+                        TextButton(onClick = { vm.setTranslationEnabled(true) }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                            Icon(Icons.Rounded.Translate, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                            Text(stringResource(R.string.manga_reader_translate), color = Color.White, modifier = Modifier.padding(start = 6.dp))
+                        }
+                    }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { previous?.let { vm.open(it.id) } }, enabled = previous != null) {
                             Icon(Icons.Rounded.SkipPrevious, stringResource(R.string.manga_reader_prev), tint = if (previous != null) Color.White else Color.White.copy(alpha = 0.3f))
@@ -403,7 +566,15 @@ fun MangaReaderRoute(mangaId: String, chapterId: String, onBack: () -> Unit) {
                     }
                     }
                 }
-                if (settingsOpen) ReaderSettingsSheet(readerMode, vm::setReaderMode) { settingsOpen = false }
+                if (settingsOpen) ReaderSettingsSheet(
+                    selected = readerMode,
+                    onSelect = vm::setReaderMode,
+                    translationAvailable = translationAvailable,
+                    translationEnabled = translationEnabled,
+                    translationBusy = translation.modelDownloading,
+                    onTranslationChange = vm::setTranslationEnabled,
+                    onDismiss = { settingsOpen = false },
+                )
             }
         }
         // Loading and error states have no reader bar; keep a way out.
@@ -457,6 +628,7 @@ private fun Credit(chapter: MangaChapter, modifier: Modifier = Modifier) {
         when {
             isShinigamiId(chapter.id) -> stringResource(R.string.manga_reader_source_shinigami)
             isKomikuId(chapter.id) -> stringResource(R.string.manga_reader_source_komiku)
+            isComixId(chapter.id) -> stringResource(R.string.manga_reader_source_comix)
             chapter.group != null -> stringResource(R.string.manga_reader_scanlation, chapter.group)
             else -> stringResource(R.string.manga_reader_scanlation_unknown)
         },
@@ -468,34 +640,56 @@ private fun Credit(chapter: MangaChapter, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun Page(url: String, index: Int, generation: Int, onFailed: () -> Unit) {
+private fun Page(
+    url: String,
+    index: Int,
+    generation: Int,
+    translation: ReaderPageTranslation?,
+    translationEnabled: Boolean,
+    modelDownloading: Boolean,
+    onRetryTranslation: () -> Unit,
+    onFailed: () -> Unit,
+) {
     var status by remember(url, generation) { mutableStateOf<AsyncImagePainter.State?>(null) }
     val description = stringResource(R.string.manga_reader_page_cd, index + 1)
-    Box(
-        Modifier.fillMaxWidth().then(if (status is AsyncImagePainter.State.Success) Modifier else Modifier.aspectRatio(1f / 1.4f)),
-        contentAlignment = Alignment.Center,
-    ) {
-        // A new generation recreates the request, so "Muat ulang" retries even when the refetched URL is identical.
-        key(generation) { AsyncImage(
-            model = url,
-            contentDescription = description,
-            contentScale = ContentScale.FillWidth,
-            onState = { status = it },
-            modifier = Modifier.fillMaxWidth(),
-        ) }
-        when (status) {
-            is AsyncImagePainter.State.Error -> TextButton(onClick = onFailed, modifier = Modifier.semantics { contentDescription = description }) {
-                Icon(Icons.Rounded.Refresh, null, tint = Color.White)
-                Text(stringResource(R.string.manga_reader_reload), color = Color.White, modifier = Modifier.padding(start = 6.dp))
+    Column(Modifier.fillMaxWidth()) {
+        Box(
+            Modifier.fillMaxWidth().then(if (status is AsyncImagePainter.State.Success) Modifier else Modifier.aspectRatio(1f / 1.4f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            // A new generation recreates the request, so "Muat ulang" retries even when the refetched URL is identical.
+            key(generation) { AsyncImage(
+                model = url,
+                contentDescription = description,
+                contentScale = ContentScale.FillWidth,
+                onState = { status = it },
+                modifier = Modifier.fillMaxWidth(),
+            ) }
+            when (status) {
+                is AsyncImagePainter.State.Error -> TextButton(onClick = onFailed, modifier = Modifier.semantics { contentDescription = description }) {
+                    Icon(Icons.Rounded.Refresh, null, tint = Color.White)
+                    Text(stringResource(R.string.manga_reader_reload), color = Color.White, modifier = Modifier.padding(start = 6.dp))
+                }
+                is AsyncImagePainter.State.Success -> Unit
+                else -> CircularProgressIndicator(color = Color.White.copy(alpha = 0.6f))
             }
-            is AsyncImagePainter.State.Success -> Unit
-            else -> CircularProgressIndicator(color = Color.White.copy(alpha = 0.6f))
         }
+        TranslationPanel(translation, translationEnabled, modelDownloading, onRetryTranslation)
     }
 }
 
 @Composable
-private fun ReaderPage(url: String, index: Int, generation: Int, onFailed: () -> Unit) {
+private fun ReaderPage(
+    url: String,
+    index: Int,
+    generation: Int,
+    translation: ReaderPageTranslation?,
+    translationEnabled: Boolean,
+    modelDownloading: Boolean,
+    onRetryTranslation: () -> Unit,
+    onFailed: () -> Unit,
+    bottomPadding: Dp,
+) {
     var status by remember(url, generation) { mutableStateOf<AsyncImagePainter.State?>(null) }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         key(generation) {
@@ -512,12 +706,88 @@ private fun ReaderPage(url: String, index: Int, generation: Int, onFailed: () ->
             is AsyncImagePainter.State.Success -> Unit
             else -> CircularProgressIndicator(color = Color.White.copy(alpha = 0.6f))
         }
+        TranslationPanel(
+            state = translation,
+            enabled = translationEnabled,
+            modelDownloading = modelDownloading,
+            onRetry = onRetryTranslation,
+            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
+                .padding(start = 8.dp, end = 8.dp, bottom = bottomPadding).clip(RoundedCornerShape(12.dp)),
+            scrollable = true,
+        )
+    }
+}
+
+/** On-device translation shown under a webtoon page, or over the bottom of a paged one. */
+@Composable
+private fun TranslationPanel(
+    state: ReaderPageTranslation?,
+    enabled: Boolean,
+    modelDownloading: Boolean,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+    scrollable: Boolean = false,
+) {
+    // No state means this page was never requested (it is merely on screen); don't show an endless spinner.
+    if (!enabled || state == null) return
+    Column(modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.88f)).padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Translate, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                stringResource(R.string.manga_reader_translate_title),
+                color = Color.White.copy(alpha = 0.75f),
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        val translation = state?.translation
+        val error = state?.error
+        when {
+            translation != null && translation.text.isNotBlank() -> Text(
+                translation.text,
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = if (scrollable) Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()) else Modifier,
+            )
+            translation != null -> Text(
+                stringResource(R.string.manga_reader_translate_no_text),
+                color = Color.White.copy(alpha = 0.75f),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            error != null -> Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    error.text(),
+                    color = Color.White.copy(alpha = 0.85f),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onRetry) { Text(stringResource(R.string.manga_reader_translate_retry), color = Color.White) }
+            }
+            else -> Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White.copy(alpha = 0.8f))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(if (modelDownloading) R.string.manga_reader_translate_model else R.string.manga_reader_translating),
+                    color = Color.White.copy(alpha = 0.8f),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReaderSettingsSheet(selected: ReaderMode, onSelect: (ReaderMode) -> Unit, onDismiss: () -> Unit) {
+private fun ReaderSettingsSheet(
+    selected: ReaderMode,
+    onSelect: (ReaderMode) -> Unit,
+    translationAvailable: Boolean,
+    translationEnabled: Boolean,
+    translationBusy: Boolean,
+    onTranslationChange: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Text(stringResource(R.string.ux_reader_mode), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(20.dp))
         ReaderMode.entries.forEach { mode ->
@@ -532,6 +802,23 @@ private fun ReaderSettingsSheet(selected: ReaderMode, onSelect: (ReaderMode) -> 
             ) {
                 Text(stringResource(label), modifier = Modifier.weight(1f))
                 if (mode == selected) Icon(Icons.Rounded.Check, null, tint = MaterialTheme.colorScheme.primary)
+            }
+        }
+        if (translationAvailable) {
+            HorizontalDivider(Modifier.padding(horizontal = 20.dp))
+            Row(
+                Modifier.fillMaxWidth().clickable { onTranslationChange(!translationEnabled) }.padding(horizontal = 20.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.manga_reader_translate_settings), style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        stringResource(if (translationBusy) R.string.manga_reader_translate_model else R.string.manga_reader_translate_settings_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = translationEnabled, onCheckedChange = onTranslationChange)
             }
         }
     }

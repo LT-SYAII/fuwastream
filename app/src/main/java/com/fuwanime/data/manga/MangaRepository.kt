@@ -5,6 +5,7 @@ import com.fuwanime.util.UiText
 import com.fuwanime.util.UiTextException
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -24,6 +25,8 @@ class MangaRepository(
     private val shinigami: ShinigamiSource? = null,
     /** Third source (Indonesian, large archive of older titles); ids starting with "km:". */
     private val komiku: KomikuSource? = null,
+    /** English source backed directly by comix.ws; ids start with "cx:". */
+    private val comix: ComixWsSource? = null,
     /** "Konten dewasa" setting: also show MangaDex titles rated erotica (e.g. Berserk, Vagabond); never pornographic. */
     private val mature: suspend () -> Boolean = { false },
 ) {
@@ -72,9 +75,37 @@ class MangaRepository(
         shinigami?.browse("popularity", null, page, type?.slug) ?: MangaPage(emptyList(), 0, 0)
 
     /** Shinigami search results for [query]; empty when the source is off or fails. */
-    suspend fun searchIndonesia(query: String): List<Manga> =
-        runCatching { shinigami?.browse(null, query)?.items }.getOrNull().orEmpty() +
-            runCatching { komiku?.search(query) }.getOrNull().orEmpty()
+    suspend fun searchIndonesia(query: String): List<Manga> {
+        val shinigamiHits = try {
+            shinigami?.browse(null, query)?.items.orEmpty()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val komikuHits = try {
+            komiku?.search(query).orEmpty()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+        return shinigamiHits + komikuHits
+    }
+
+    /** English Comix results; empty when its protected client module is unavailable or too slow for a search. */
+    suspend fun searchComix(query: String): List<Manga> = try {
+        withTimeoutOrNull(COMIX_SEARCH_TIMEOUT_MS) { comix?.search(query).orEmpty() }.orEmpty()
+    } catch (e: CancellationException) {
+        // Never let a cancelled query keep running and overwrite newer hits.
+        throw e
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    /** Popular English titles from Comix. */
+    suspend fun popularComix(page: Int = 1, type: MangaType? = null): MangaPage =
+        comix?.browse(MangaOrder.POPULAR, page = page, type = type) ?: MangaPage(emptyList(), 0, 0)
 
     /** Popular Komiku titles; [page] is 1-based, 10 per page. */
     suspend fun popularKomiku(page: Int = 1, type: MangaType? = null): MangaPage =
@@ -101,7 +132,8 @@ class MangaRepository(
         val others = listOfNotNull(
             if (isShinigamiId(manga.id)) null else async { look { shinigami?.find(names) } },
             if (isKomikuId(manga.id)) null else async { look { komiku?.find(names) } },
-            if (isShinigamiId(manga.id) || isKomikuId(manga.id)) async { look { findOnMangaDex(names) } } else null,
+            if (isComixId(manga.id)) null else async { look { comix?.find(names) } },
+            if (isShinigamiId(manga.id) || isKomikuId(manga.id) || isComixId(manga.id)) async { look { findOnMangaDex(names) } } else null,
         ).awaitAll().filterNotNull()
         (listOf(manga) + others).also { sourceCache[manga.id] = it }
     }
@@ -129,6 +161,7 @@ class MangaRepository(
     suspend fun detail(id: String): Manga {
         if (isShinigamiId(id)) return shinigami?.detail(id) ?: throw notFound()
         if (isKomikuId(id)) return komiku?.detail(id) ?: throw notFound()
+        if (isComixId(id)) return comix?.detail(id) ?: throw notFound()
         val dto = call { api.manga(id, listOf("cover_art", "author")) }.data ?: throw notFound()
         return dto.toManga(appLanguage(), 512)
     }
@@ -136,6 +169,7 @@ class MangaRepository(
     suspend fun chapters(id: String): List<MangaChapter> {
         if (isShinigamiId(id)) return shinigami?.chapters(id).orEmpty()
         if (isKomikuId(id)) return komiku?.chapters(id).orEmpty()
+        if (isComixId(id)) return comix?.chapters(id).orEmpty()
         val all = ArrayList<MangaChapter>()
         var offset = 0
         while (true) {
@@ -160,6 +194,7 @@ class MangaRepository(
     suspend fun pages(chapterId: String, dataSaver: Boolean, forceRefresh: Boolean = false): List<String> {
         if (isShinigamiId(chapterId)) return shinigami?.pages(chapterId).orEmpty()
         if (isKomikuId(chapterId)) return komiku?.pages(chapterId).orEmpty()
+        if (isComixId(chapterId)) return comix?.pages(chapterId).orEmpty()
         val cached = atHomeCache[chapterId]?.takeIf { !forceRefresh && now() - it.first < BASE_URL_TTL_MS }
         val dto = cached?.second ?: call { api.atHome(chapterId) }.also { atHomeCache[chapterId] = now() to it }
         return pageUrls(dto.baseUrl, dto.chapter.hash, dto.chapter.data, dto.chapter.dataSaver, dataSaver)
@@ -196,6 +231,7 @@ class MangaRepository(
         val FEED_LANGS = listOf("id", "en", "ja", "ko", "zh", "zh-hk")
         const val LOOKUP_TIMEOUT_MS = 8_000L
         const val OTHER_CHAPTERS_TIMEOUT_MS = 15_000L
+        const val COMIX_SEARCH_TIMEOUT_MS = 15_000L
         val RATINGS = listOf("safe", "suggestive")
         val RATINGS_MATURE = RATINGS + "erotica"
     }

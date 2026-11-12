@@ -1,6 +1,7 @@
 package com.fuwanime
 
 import com.fuwanime.data.manga.KomikuSource
+import com.fuwanime.data.manga.ComixWsSource
 import com.fuwanime.data.manga.ShinigamiApi
 import com.fuwanime.data.manga.ShinigamiSource
 import com.fuwanime.data.manga.MangaDexDns
@@ -25,6 +26,7 @@ import com.fuwanime.data.local.SettingsStore
 import com.fuwanime.data.manga.MangaDexApi
 import com.fuwanime.data.manga.MangaDownloadRepository
 import com.fuwanime.data.manga.MangaRepository
+import com.fuwanime.data.manga.MangaTranslator
 import com.fuwanime.data.manga.RateLimitInterceptor
 import com.fuwanime.data.meta.AniListApi
 import com.fuwanime.data.meta.AniSkipApi
@@ -130,6 +132,7 @@ class AppContainer(private val app: Application) {
             appLanguage = { app.resources.configuration.locales[0].language },
             shinigami = ShinigamiSource(ShinigamiApi.create(mangaHttpClient)),
             komiku = KomikuSource(mangaHttpClient),
+            comix = ComixWsSource(app, mature = { settingsStore.matureContent.first() }),
             mature = { settingsStore.matureContent.first() },
         )
     }
@@ -138,6 +141,9 @@ class AppContainer(private val app: Application) {
 
     /** Downloaded manga chapters (app-private files), fetched one at a time by MangaDownloadWorker. */
     val mangaDownloads by lazy { MangaDownloadRepository(app, mangaDownloadDao, settingsStore) }
+
+    /** On-device OCR + EN→ID translation for Comix image chapters; images use the clean video client. */
+    val mangaTranslator by lazy { MangaTranslator(videoHttpClient) }
 
     /** Daily backup file in a folder the user picked; survives an uninstall. */
     val backupRepository by lazy { BackupRepository(app, libraryRepository, settingsStore) }

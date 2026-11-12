@@ -189,8 +189,15 @@ class ExploreViewModel(
             } catch (_: Exception) {
                 emptyList()
             }
+            val comix = try {
+                mangaRepository.searchComix(q)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                emptyList()
+            }
             // Different sources give the same title different ids; keep the first (local) hit per title.
-            val merged = (local + dex).distinctBy { it.id }.distinctBy { it.title.trim().lowercase() }.take(12)
+            val merged = (local + comix + dex).distinctBy { it.id }.distinctBy { it.title.trim().lowercase() }.take(12)
             _state.update { it.copy(mangaResults = merged, mangaLoading = false) }
         }
     }
