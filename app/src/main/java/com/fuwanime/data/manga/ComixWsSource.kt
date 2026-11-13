@@ -17,22 +17,30 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
-/** Comix (comix.ws), an English catalogue. API ids are prefixed so repository routing stays unambiguous. */
+/** Comix (comix.ws), the primary English catalogue. API ids are prefixed so repository routing stays unambiguous. */
 const val CX_PREFIX = "cx:"
 
 fun isComixId(id: String): Boolean = id.startsWith(CX_PREFIX)
 
 private const val COMIX_ORIGIN = "https://comix.ws"
+private const val COMIX_USER_AGENT =
+    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
 
 private fun Any?.map(): Map<String, Any?> = this as? Map<String, Any?> ?: emptyMap()
 private fun Any?.list(): List<Any?> = this as? List<Any?> ?: emptyList()
@@ -46,59 +54,76 @@ private fun Map<String, Any?>.firstInt(vararg keys: String): Int? =
     keys.firstNotNullOfOrNull { int(it) }
 private fun Map<String, Any?>.tagNames(vararg keys: String): List<String> =
     keys.flatMap { this[it].list() }
-        .mapNotNull { it.map().firstString("k_", "rf") }
+        .mapNotNull { it.map().firstString("Z2", "k_", "rf", "title") }
         .distinct()
 
 private fun absoluteComixUrl(path: String?): String? = path?.let { if (it.startsWith("http")) it else COMIX_ORIGIN + it }
 
 internal fun comixManga(data: Any?): Manga {
     val m = data.map()
-    val hid = m.firstString("SZ", "fH").orEmpty()
-    val title = m.firstString("k_", "rf").orEmpty()
-    val poster = m["fL"].map().ifEmpty { m["Zs"].map() }
+    val hid = m.firstString("rU", "SZ", "fH", "hid").orEmpty()
+    val title = m.firstString("Z2", "k_", "rf", "title").orEmpty()
+    val poster = m["P7"].map().ifEmpty { m["fL"].map() }.ifEmpty { m["Zs"].map() }.ifEmpty { m["poster"].map() }
     return Manga(
         id = CX_PREFIX + hid,
         title = title,
-        coverUrl = absoluteComixUrl(poster.firstString("Tr", "sP", "HS", "QC")),
-        description = m.firstString("U$", "U7", "fK").orEmpty(),
-        tags = m.tagNames("Dx", "gS", "UR", "J5", "hV", "A5", "dE"),
-        status = when (m.firstString("yx", "oF")) {
+        coverUrl = absoluteComixUrl(poster.firstString("cT", "Tr", "sP", "HS", "QC", "Kq", "medium", "large")),
+        description = m.firstString("Ht", "U$", "U7", "fK", "synopsis").orEmpty(),
+        tags = m.tagNames("_v", "Tw", "QT", "Il", "Dx", "gS", "UR", "J5", "hV", "A5", "dE"),
+        status = when (m.firstString("cB", "yx", "oF", "status")) {
             "releasing" -> MangaStatus.ONGOING
             "finished" -> MangaStatus.COMPLETED
             "on_hiatus" -> MangaStatus.HIATUS
             "discontinued" -> MangaStatus.CANCELLED
             else -> MangaStatus.UNKNOWN
         },
-        year = m.firstInt("Pi", "Pa", "_r"),
-        author = m["ZN"].list().ifEmpty { m["uy"].list() }
-            .mapNotNull { it.map().firstString("k_", "rf") }.joinToString().ifBlank { null },
-        altTitles = m["Hv"].list().ifEmpty { m["Ga"].list() }
+        year = m.firstInt("Hb", "Pi", "Pa", "_r", "year"),
+        author = (m["TH"].list().ifEmpty { m["NR"].list() }).mapNotNull { it.map().firstString("Z2", "k_", "rf", "title") }
+            .joinToString().ifBlank { null }
+            ?: m["ZN"].list().ifEmpty { m["uy"].list() }.mapNotNull { it.map().firstString("Z2", "k_", "rf") }
+                .joinToString().ifBlank { null },
+        altTitles = m["Jy"].list().ifEmpty { m["Hv"].list() }.ifEmpty { m["Ga"].list() }
             .mapNotNull { it?.toString() }.filter { it != title },
-        type = m.firstString("nv", "GR")?.replaceFirstChar(Char::uppercase),
+        type = m.firstString("ei", "nv", "GR", "type")?.replaceFirstChar(Char::uppercase),
     )
 }
 
 internal fun comixChapter(data: Any?, hid: String): MangaChapter {
     val c = data.map()
-    val id = c.firstInt("hk", "kM") ?: 0
+    val id = c.firstInt("VT", "hk", "kM") ?: 0
     return MangaChapter(
         id = "$CX_PREFIX$hid:$id",
-        number = c.firstString("Z_", "Xn")?.removeSuffix(".0"),
-        title = c.firstString("nb", "f9"),
-        language = c.firstString("aK", "FP") ?: "en",
-        group = c["rk"].map().firstString("nb", "f9") ?: c["gm"].map().string("f9") ?: "Comix",
-        // Comix only reports the exact page count on the reader endpoint. One marks API chapters as readable.
-        pages = 1,
+        number = c.firstString("PD", "Z_", "Xn")?.removeSuffix(".0"),
+        title = c.firstString("q1", "nb", "f9")?.takeIf { it.isNotBlank() },
+        language = c.firstString("Ax", "aK", "FP") ?: "en",
+        group = c["qz"].map().ifEmpty { c["rk"].map() }.firstString("q1", "nb", "f9") ?: c["gm"].map().string("f9") ?: "Comix",
+        pages = c.firstInt("QQ") ?: 1,
         externalUrl = null,
-        publishAt = 0,
+        publishAt = parseComixRelativeTime(c.firstString("iS")),
     )
 }
 
 internal fun comixPageUrls(data: Any?): List<String> {
     val m = data.map()
-    return m["iE"].list().ifEmpty { m["iT"].list() }
-        .mapNotNull { it.map().firstString("Gh", "H$") }
+    return m["sN"].list().ifEmpty { m["iE"].list() }.ifEmpty { m["iT"].list() }
+        .mapNotNull { it.map().firstString("FM", "Gh", "H$") }
         .filter { it.startsWith("https://") }
+}
+
+private fun parseComixRelativeTime(value: String?): Long {
+    val match = Regex("(\\d+)\\s*(mos|mo|yr|yrs|y|w|d|h|m)").find(value ?: return 0L) ?: return 0L
+    val count = match.groupValues[1].toLongOrNull() ?: return 0L
+    val unit = match.groupValues[2]
+    val ms = when (unit) {
+        "m" -> 60_000L
+        "h" -> 3_600_000L
+        "d" -> 86_400_000L
+        "w" -> 7 * 86_400_000L
+        "mo", "mos" -> 30 * 86_400_000L
+        "y", "yr", "yrs" -> 365 * 86_400_000L
+        else -> return 0L
+    }
+    return System.currentTimeMillis() - count * ms
 }
 
 private fun comixParts(id: String): Pair<String, Int>? {
@@ -107,36 +132,46 @@ private fun comixParts(id: String): Pair<String, Int>? {
 }
 
 /**
- * Runs Comix's current signing/decryption module in Android WebView. This remains entirely on-device: the WebView
- * talks directly to comix.ws and only returns the decrypted JSON to Kotlin. Keeping the site's module dynamic also
- * avoids shipping its frequently rotated cfg token or an obsolete copy of the protected algorithm.
+ * Comix (comix.ws) client. The site signs and decrypts its API responses in a rotated client module, so a WebView
+ * runs that module on-device and returns the decrypted JSON to Kotlin. No server or API key is involved.
  */
 class ComixWsSource(
     app: Application,
     private val mature: suspend () -> Boolean = { false },
+    private val client: OkHttpClient? = null,
 ) {
     private val runtime = ComixWebRuntime(app)
+    private val moshi = Moshi.Builder().build()
+    private val jsonAdapter = moshi.adapter(Any::class.java)
 
-    suspend fun browse(order: MangaOrder, query: String = "", page: Int = 1, type: MangaType? = null): MangaPage {
+    suspend fun browse(
+        order: MangaOrder,
+        query: String = "",
+        page: Int = 1,
+        type: MangaType? = null,
+        tagIds: List<String> = emptyList(),
+        status: MangaStatus? = null,
+    ): MangaPage {
         val params = linkedMapOf<String, Any?>(
-            "limit" to PAGE_SIZE,
             "page" to page,
-            "content_rating" to if (mature()) listOf("safe", "suggestive", "erotica") else listOf("safe", "suggestive"),
+            "limit" to PAGE_SIZE,
+            "content_rating" to ratings(),
         )
-        // Relevance is the API default for keyword searches; an explicit order could be rejected.
         when (order) {
             MangaOrder.LATEST -> params["order"] = mapOf("chapter_updated_at" to "desc")
-            MangaOrder.POPULAR -> params["order"] = mapOf("views_total" to "desc")
-            MangaOrder.RELEVANCE -> Unit
+            MangaOrder.POPULAR -> params["order"] = mapOf("follows_total" to "desc")
+            // Relevance is the API default for keyword searches; an explicit order could be rejected.
+            MangaOrder.RELEVANCE -> if (query.isBlank()) params["order"] = mapOf("follows_total" to "desc")
         }
         query.trim().takeIf { it.isNotEmpty() }?.let { params["keyword"] = it }
         type?.let { params["types"] = listOf(it.slug) }
-        val result = runtime.call("browse", "", params)
-        val map = result.map()
-        val items = map["I7"].list().ifEmpty { map["EY"].list() }
+        tagIds.mapNotNull { it.toIntOrNull() }.takeIf { it.isNotEmpty() }?.let { params["genres_in"] = it }
+        status?.comixValue()?.let { params["statuses"] = listOf(it) }
+        val result = runtime.call("browse", params).map()
+        val items = result["s3"].list().ifEmpty { result["I7"].list() }.ifEmpty { result["EY"].list() }
             .map(::comixManga).filter { it.id != CX_PREFIX && it.title.isNotBlank() }
-        val meta = map["aY"].map().ifEmpty { map["\$U"].map() }
-        val total = meta.firstInt("T8", "fc") ?: items.size
+        val meta = result["om"].map().ifEmpty { result["aY"].map() }.ifEmpty { result["\$U"].map() }
+        val total = meta.firstInt("Yl", "T8", "fc") ?: items.size
         return MangaPage(items, total, (page - 1) * PAGE_SIZE)
     }
 
@@ -144,32 +179,65 @@ class ComixWsSource(
 
     suspend fun detail(id: String): Manga {
         val hid = id.removePrefix(CX_PREFIX).substringBefore(':')
-        return comixManga(runtime.call("detail", hid, null))
+        return comixManga(runtime.call("detail", hid))
     }
 
     suspend fun chapters(id: String): List<MangaChapter> {
         val hid = id.removePrefix(CX_PREFIX).substringBefore(':')
         val all = ArrayList<MangaChapter>()
         var page = 1
-        var pages = 1
+        var lastPage = 1
         do {
             val result = runtime.call(
                 "chapters",
-                hid,
-                mapOf("limit" to CHAPTER_LIMIT, "page" to page, "order" to mapOf("number" to "desc")),
+                mapOf(
+                    "hid" to hid,
+                    "options" to mapOf("limit" to CHAPTER_LIMIT, "page" to page, "order" to mapOf("number" to "desc")),
+                ),
             ).map()
-            val items = result["I7"].list().ifEmpty { result["EY"].list() }
-            all += items.map { comixChapter(it, hid) }.filter { it.language == "en" }
-            val meta = result["aY"].map().ifEmpty { result["\$U"].map() }
-            pages = meta.firstInt("yJ", "Gc") ?: page
+            val items = result["s3"].list().ifEmpty { result["I7"].list() }.ifEmpty { result["EY"].list() }
+            all += items.map { comixChapter(it, hid) }.filter { it.language == "en" || it.language.isBlank() }
+            val meta = result["om"].map().ifEmpty { result["aY"].map() }.ifEmpty { result["\$U"].map() }
+            val total = meta.firstInt("Yl", "T8", "fc") ?: items.size
+            val perPage = meta.firstInt("wt", "f6") ?: CHAPTER_LIMIT
+            val pages = meta.firstInt("zq") ?: if (perPage > 0) (total + perPage - 1) / perPage else 1
+            lastPage = pages.coerceAtMost(MAX_CHAPTER_PAGES)
             page++
-        } while (page <= pages)
+        } while (page <= lastPage)
         return pickChapters(all, "en")
     }
 
     suspend fun pages(chapterId: String): List<String> {
-        val (hid, id) = comixParts(chapterId) ?: return emptyList()
-        return comixPageUrls(runtime.call("reader", hid, id))
+        val (_, id) = comixParts(chapterId) ?: return emptyList()
+        return comixPageUrls(runtime.call("reader", id))
+    }
+
+    /** Newest chapter of recently updated Comix manga, for notifications and the home summary. */
+    suspend fun latestOngoingChapters(limit: Int): List<MangaRelease> {
+        val manga = ArrayList<Manga>()
+        var page = 1
+        while (manga.size < limit && page <= MAX_RELEASE_PAGES) {
+            val items = browse(MangaOrder.LATEST, page = page).items
+            if (items.isEmpty()) break
+            manga += items
+            page++
+        }
+        return coroutineScope {
+            manga.take(limit).map { m ->
+                async {
+                    runCatching {
+                        val hid = m.id.removePrefix(CX_PREFIX).substringBefore(':')
+                        val detail = runtime.call("detail", hid).map()
+                        val latestUrl = detail.firstString("HD", "latestChapterUrl") ?: return@runCatching null
+                        val number = detail.firstInt("hb", "latestChapter")
+                        val chapterId = Regex("/title/[^/]+/(\\d+)-chapter-").find(latestUrl)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                            ?: return@runCatching null
+                        val publishAt = parseComixRelativeTime(detail.firstString("sO", "chapterUpdatedAtFormatted"))
+                        MangaRelease(m.id, m.title, "$CX_PREFIX$hid:$chapterId", number?.toString(), publishAt)
+                    }.getOrNull()
+                }
+            }.awaitAll().filterNotNull()
+        }
     }
 
     suspend fun find(names: List<String>): Manga? {
@@ -186,9 +254,35 @@ class ComixWsSource(
         return null
     }
 
+    /** Genre ids and names from Comix's server-rendered browse options; stable across client-module deploys. */
+    suspend fun tags(): List<MangaTag> = withContext(Dispatchers.IO) {
+        val http = client ?: return@withContext emptyList()
+        val request = Request.Builder().url("$COMIX_ORIGIN/browse").header("User-Agent", COMIX_USER_AGENT).build()
+        val html = http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return@withContext emptyList()
+            response.body?.string().orEmpty()
+        }
+        val raw = INITIAL_DATA.find(html)?.groupValues?.getOrNull(1) ?: return@withContext emptyList()
+        val root = jsonAdapter.fromJson(raw) as? Map<*, *> ?: return@withContext emptyList()
+        val list = root["list"] as? Map<*, *> ?: return@withContext emptyList()
+        val options = list["options"] as? Map<*, *> ?: return@withContext emptyList()
+        (options["genres"] as? List<*>).orEmpty().mapNotNull { item ->
+            val map = item as? Map<*, *> ?: return@mapNotNull null
+            val id = map["id"]?.toString() ?: return@mapNotNull null
+            val label = map["label"] as? String ?: return@mapNotNull null
+            MangaTag(id, label, "genre")
+        }
+    }
+
+    private suspend fun ratings(): List<String> =
+        if (mature()) listOf("safe", "suggestive", "erotica") else listOf("safe", "suggestive")
+
     private companion object {
         const val PAGE_SIZE = 28
         const val CHAPTER_LIMIT = 100
+        const val MAX_CHAPTER_PAGES = 50
+        const val MAX_RELEASE_PAGES = 4
+        val INITIAL_DATA = Regex("<script type=\"application/json\" id=\"initial-data\">(.*?)</script>", RegexOption.DOT_MATCHES_ALL)
     }
 }
 
@@ -197,12 +291,15 @@ private class ComixWebRuntime(private val app: Application) {
     private val jsonAdapter = moshi.adapter(Any::class.java)
     private val mutex = Mutex()
     private val handler = Handler(Looper.getMainLooper())
-    private val pending = ConcurrentHashMap<String, kotlin.coroutines.Continuation<Any?>>()
+    private val pending = ConcurrentHashMap<String, Continuation<Any?>>()
     private var webView: WebView? = null
+    private var pageReady = false
+    private var pageContinuation: Continuation<Unit>? = null
+    private var pageError: Throwable? = null
 
-    suspend fun call(operation: String, hid: String, argument: Any?): Any? = mutex.withLock {
+    suspend fun call(operation: String, argument: Any?): Any? = mutex.withLock {
         try {
-            withTimeout(REQUEST_TIMEOUT_MS) { invoke(operation, hid, argument) }
+            withTimeout(REQUEST_TIMEOUT_MS) { invoke(operation, argument) }
         } catch (e: TimeoutCancellationException) {
             // A caller's own timeout (e.g. a bounded search) is cancellation, not a Comix failure.
             if (!currentCoroutineContext().isActive) throw e
@@ -211,85 +308,91 @@ private class ComixWebRuntime(private val app: Application) {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private suspend fun invoke(operation: String, hid: String, argument: Any?): Any? = withContext(Dispatchers.Main.immediate) {
+    private suspend fun invoke(operation: String, argument: Any?): Any? = withContext(Dispatchers.Main.immediate) {
+        ensurePage()
         suspendCancellableCoroutine { continuation ->
             val token = UUID.randomUUID().toString()
             pending[token] = continuation
             continuation.invokeOnCancellation { pending.remove(token) }
-            val view = webView ?: WebView(app).also { created ->
-                created.settings.javaScriptEnabled = true
-                created.settings.domStorageEnabled = true
-                created.settings.userAgentString = USER_AGENT
-                created.addJavascriptInterface(Bridge(), BRIDGE_NAME)
-                webView = created
-            }
-            val target = "$COMIX_ORIGIN/browse"
-            view.webViewClient = object : WebViewClient() {
-                override fun onPageFinished(view: WebView, url: String) {
-                    if (!url.startsWith(COMIX_ORIGIN)) return
-                    view.evaluateJavascript(script(token, operation, hid, argument), null)
-                }
-
-                override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                    if (request.isForMainFrame) fail(token, IOException("Comix WebView ${error.errorCode}: ${error.description}"))
-                }
-            }
-            view.loadUrl(target)
+            val view = webView ?: throw IOException("Comix WebView unavailable")
+            view.evaluateJavascript(script(token, operation, argument), null)
         }
     }
 
-    private fun script(token: String, operation: String, hid: String, argument: Any?): String {
+    /** Loads the site once; later calls reuse the page and the already-imported API module. */
+    private suspend fun ensurePage() {
+        if (pageReady) return
+        pageError?.let { pageError = null; throw it }
+        suspendCancellableCoroutine<Unit> { continuation ->
+            val view = webView ?: WebView(app).also { created ->
+                created.settings.javaScriptEnabled = true
+                created.settings.domStorageEnabled = true
+                created.settings.userAgentString = COMIX_USER_AGENT
+                created.addJavascriptInterface(Bridge(), BRIDGE_NAME)
+                webView = created
+            }
+            pageContinuation = continuation
+            continuation.invokeOnCancellation { if (pageContinuation === continuation) pageContinuation = null }
+            view.webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView, url: String) {
+                    if (!url.startsWith(COMIX_ORIGIN)) return
+                    pageReady = true
+                    pageContinuation?.resume(Unit)
+                    pageContinuation = null
+                }
+
+                override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                    if (!request.isForMainFrame) return
+                    pageReady = false
+                    val failure = IOException("Comix WebView ${error.errorCode}: ${error.description}")
+                    pageError = failure
+                    pageContinuation?.resumeWithException(failure)
+                    pageContinuation = null
+                }
+            }
+            view.loadUrl("$COMIX_ORIGIN/browse")
+        }
+    }
+
+    private fun script(token: String, operation: String, argument: Any?): String {
         val arg = jsonAdapter.toJson(argument)
         return """
             (async () => {
               const token = ${jsString(token)};
               try {
-                const main = [...document.scripts].map(s => s.src).find(s => /\/main-[^/]+\.js(?:\?|$)/.test(s));
-                if (!main) throw new Error('Comix main module not found');
-                const source = await (await fetch(main)).text();
-                const match = source.match(/apicore-[A-Za-z0-9_-]+\.js/);
-                if (!match) throw new Error('Comix API module not found');
-                const api = await import(new URL(match[0], main).href);
+                let api = window.__fuwaComixApi;
+                if (!api) {
+                  const main = [...document.scripts].map(s => s.src).find(s => /\/main-[^/]+\.js(?:\?|$)/.test(s));
+                  if (!main) throw new Error('Comix main module not found');
+                  const source = await (await fetch(main)).text();
+                  const match = source.match(/apicore-[A-Za-z0-9_-]+\.js/);
+                  if (!match) throw new Error('Comix API module not found');
+                  api = await import(new URL(match[0], main).href);
+                  window.__fuwaComixApi = api;
+                }
                 const groups = Object.values(api).filter(v => v && typeof v === 'object');
-                const method = (group, names) => {
-                  for (const name of names) {
-                    try { if (typeof group[name] === 'function') return group[name].bind(group); } catch (_) {}
+                const find = (test) => {
+                  for (const group of groups) {
+                    try { if (test(group)) return group; } catch (_) {}
                   }
                   return null;
                 };
                 // The site's minified export letters change on deploy; find modules by the methods they expose.
-                const find = (markers) => {
-                  for (const group of groups) {
-                    try { if (markers.every(([name, kind]) => typeof group[name] === kind)) return group; } catch (_) {}
-                  }
-                  return null;
-                };
-                const catalogue = find([['iL', 'function'], ['vS', 'function'], ['Wu', 'function'], ['Yx', 'function']])
-                  ?? find([['CF', 'function'], ['uo', 'function'], ['Xr', 'function'], ['aM', 'function']]);
+                const catalogue = find(g => ['QJ', 'Tm', 'OJ', 'kC', 'Aj', 'cr', 'IX', 'zf'].every(n => typeof g[n] === 'function'));
                 if (!catalogue) throw new Error('Comix catalogue module not found');
-                const reader = find([['vS', 'function'], ['qv', 'function']])
-                  ?? find([['uo', 'function'], ['qv', 'function']]);
-                if (!reader) throw new Error('Comix reader module not found');
                 const op = ${jsString(operation)};
-                const hid = ${jsString(hid)};
                 const arg = $arg;
                 let result;
                 if (op === 'browse') {
-                  const fn = method(catalogue, ['iL', 'CF']);
-                  if (!fn) throw new Error('Comix browse unavailable');
-                  result = await fn(arg);
+                  result = await catalogue.QJ(arg);
                 } else if (op === 'detail') {
-                  const fn = method(catalogue, ['vS', 'uo']);
-                  if (!fn) throw new Error('Comix detail unavailable');
-                  result = await fn(hid);
+                  result = await catalogue.Tm(arg);
                 } else if (op === 'chapters') {
-                  const fn = method(catalogue, ['Wu', 'Xr']);
-                  if (!fn) throw new Error('Comix chapters unavailable');
-                  result = await fn(hid, arg);
+                  result = await catalogue.OJ(arg.hid, arg.options);
                 } else if (op === 'reader') {
-                  const fn = method(reader, ['vS', 'uo']);
-                  if (!fn) throw new Error('Comix reader unavailable');
-                  result = await fn(arg);
+                  const chapter = find(g => typeof g.Tm === 'function' && typeof g.tA === 'function' && typeof g.QJ !== 'function');
+                  if (!chapter) throw new Error('Comix chapter module not found');
+                  result = await chapter.Tm(arg);
                 } else {
                   throw new Error('Unknown Comix operation');
                 }
@@ -326,6 +429,5 @@ private class ComixWebRuntime(private val app: Application) {
     private companion object {
         const val BRIDGE_NAME = "FuwaComix"
         const val REQUEST_TIMEOUT_MS = 60_000L
-        const val USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
     }
 }

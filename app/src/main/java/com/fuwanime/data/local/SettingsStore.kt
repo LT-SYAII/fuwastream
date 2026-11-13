@@ -40,7 +40,7 @@ data class AppSettings(
     val notifyNewEpisodes: Boolean = true,
     /** Release notifications for any ongoing anime, not only favourites. */
     val notifyOngoingAnime: Boolean = true,
-    /** Release notifications for any ongoing manga (MangaDex, app language). */
+    /** Release notifications for any ongoing manga (Comix). */
     val notifyNewChapters: Boolean = true,
     /** Notify when a newer app version is published on GitHub Releases. */
     val notifyAppUpdates: Boolean = true,
@@ -83,7 +83,6 @@ internal object Keys {
     val ageConfirmed = booleanPreferencesKey("age_confirmed")
     val backgroundAudio = booleanPreferencesKey("background_audio")
     val videoResize = stringPreferencesKey("video_resize")
-    val mangaDataSaver = booleanPreferencesKey("manga_data_saver")
     val mangaTranslate = booleanPreferencesKey("manga_translate")
     val mangaMature = booleanPreferencesKey("manga_mature")
     val backupTreeUri = stringPreferencesKey("backup_tree_uri")
@@ -197,10 +196,6 @@ class SettingsStore(private val context: Context) {
     suspend fun setMobileDataQuality(height: Int) = context.dataStore.edit { it[Keys.mobileDataQuality] = height }
     suspend fun setBackgroundAudio(enabled: Boolean) = context.dataStore.edit { it[Keys.backgroundAudio] = enabled }
     suspend fun setVideoResize(mode: VideoResize) = context.dataStore.edit { it[Keys.videoResize] = mode.name }
-
-    /** Smaller MangaDex "data-saver" images in the reader. */
-    val mangaDataSaver: Flow<Boolean> = context.dataStore.data.map { it[Keys.mangaDataSaver] ?: false }
-    suspend fun setMangaDataSaver(enabled: Boolean) = context.dataStore.edit { it[Keys.mangaDataSaver] = enabled }
 
     /** English image chapters (Comix) are translated to Indonesian on-device once the reader opts in. */
     val mangaTranslate: Flow<Boolean> = context.dataStore.data.map { it[Keys.mangaTranslate] ?: false }

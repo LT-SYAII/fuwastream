@@ -126,11 +126,10 @@ class ComixMappingTest {
         assertEquals(listOf("https://1xx.example/a.webp", "https://1xx.example/c.webp"), pages)
     }
 
-    @Test fun comixOutranksMangaDexButNotIndonesianSources() {
+    @Test fun comixRanksBelowIndonesianSources() {
         assertEquals(0, sourceRank("sh:1"))
         assertEquals(1, sourceRank("km:1"))
         assertEquals(2, sourceRank("cx:63057:11275751"))
-        assertEquals(3, sourceRank("mangadex-id"))
     }
 
     @Test fun translationChunksKeepEveryLine() {

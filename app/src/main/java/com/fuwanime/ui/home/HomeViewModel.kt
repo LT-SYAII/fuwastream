@@ -215,7 +215,7 @@ class HomeViewModel(
         }
         viewModelScope.launch {
             settingsStore.matureContent.distinctUntilChanged().drop(1).collect {
-                // Rebuild both anime and MangaDex shelves immediately when the global content filter changes.
+                // Rebuild both anime and Comix shelves immediately when the global content filter changes.
                 load(refreshing = false)
                 loadMangaReleases()
             }

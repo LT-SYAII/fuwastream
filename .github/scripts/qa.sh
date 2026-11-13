@@ -78,12 +78,12 @@ upgrade_from_release() {
 }
 upgrade_from_release
 
-# 12. Manga tab: shelves from MangaDex + Shinigami load, a Shinigami title opens, its first chapter renders in the reader.
+# 12. Manga tab: shelves from Comix + Shinigami load, a Shinigami title opens, its first chapter renders in the reader.
 manga_check() { [ -n "$(find_xy "$1")" ] && echo "manga: $2 ok" | tee -a "$OUT/qa-checks.txt" || echo "manga: $2 MISSING" | tee -a "$OUT/qa-checks.txt"; }
 record qa12-manga
 fresh; tap "Manga"; shot qa12a-manga-tab 10
-manga_check "Populer Indonesia" "shinigami shelf"
-manga_check "Update terbaru" "mangadex latest shelf"
+manga_check "Populer di Indonesia" "shinigami shelf"
+manga_check "Trending dunia" "comix latest shelf"
 [ -n "$(find_xy "Gagal memuat")" ] && echo "manga: load error shown" | tee -a "$OUT/qa-checks.txt"
 y=$(find_xy "Populer Indonesia" | cut -d' ' -f2)
 adb shell input tap 150 $(( ${y:-700} + 260 )); shot qa12b-manga-detail 8

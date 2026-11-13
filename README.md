@@ -58,7 +58,7 @@
         <li><b>Jelajah</b> — cari judul, genre, atau studio; filter tipe &amp; genre; urutkan populer, terbaru, atau A–Z.</li>
         <li><b>Jadwal tayang</b> — rilis per hari lengkap dengan jamnya.</li>
         <li><b>Anime serupa &amp; season terkait</b> — langsung dari halaman detail.</li>
-        <li><b>Manga</b> — saklar Anime | Manga di Beranda &amp; Jelajah; baca chapter Indonesia/Inggris dari <a href="https://mangadex.org">MangaDex</a> dan <a href="https://comix.ws">Comix</a> dengan reader scroll vertikal, lanjut baca, favorit, mode hemat data, serta terjemahan Indonesia di perangkat yang ditimpa langsung ke gambar untuk chapter Comix.</li>
+        <li><b>Manga</b> — saklar Anime | Manga di Beranda &amp; Jelajah; baca chapter dari <a href="https://comix.ws">Comix</a> sebagai katalog utama plus sumber Indonesia <a href="https://shinigami.asia">Shinigami</a> dan <a href="https://komiku.org">Komiku</a>, dengan reader scroll vertikal, lanjut baca, favorit, unduhan, serta terjemahan Indonesia di perangkat yang ditimpa langsung ke gambar untuk chapter Comix.</li>
       </ul>
     </td>
     <td width="50%" valign="top">
@@ -189,7 +189,7 @@ com.fuwanime
 | Nama | Peran |
 | :--- | :--- |
 | **YuzakiNetwork (Haruka Fuyune)** · fuwanimereal@gmail.com | Pendiri &amp; admin proyek — brand &amp; ikon, legal &amp; kepatuhan, rilis &amp; build CI, notifikasi episode, pengecek update, anime serupa, unduhan massal, filter tipe konten |
-| **Andra** · andrahijati@gmail.com | Kolaborator &amp; kontributor — UI/UX (redesign, aksesibilitas, Statistik, Koleksi, multi-bahasa), Manga (MangaDex, Shinigami, Komiku, reader), Infrastruktur (CI &amp; QA, database &amp; backup, cache offline, DNS-over-HTTPS), Pemutar (Media3, PiP, audio latar, AniSkip) |
+| **Andra** · andrahijati@gmail.com | Kolaborator &amp; kontributor — UI/UX (redesign, aksesibilitas, Statistik, Koleksi, multi-bahasa), Manga (Comix, Shinigami, Komiku, reader, terjemahan di perangkat), Infrastruktur (CI &amp; QA, database &amp; backup, cache offline, DNS-over-HTTPS), Pemutar (Media3, PiP, audio latar, AniSkip) |
 
 ## 🤝 Kontribusi
 
@@ -204,7 +204,7 @@ Punya ide fitur atau menemukan bug? [Buat Issue](https://github.com/fuwanime/fuw
 ## ⚠️ Catatan konten
 
 > [!NOTE]
-> FuwaStream adalah aplikasi klien dan **tidak meng-host file video**. Informasi dan sumber pemutaran berasal dari API atau layanan pihak ketiga, sehingga ketersediaan konten bergantung pada layanan tersebut. Pengguna bertanggung jawab mematuhi hukum, hak cipta, dan ketentuan layanan yang berlaku di wilayahnya. Nama, logo, dan aset pihak ketiga tetap milik pemegang haknya. Data dan gambar manga berasal dari [MangaDex](https://mangadex.org) dan [Comix](https://comix.ws) beserta grup scanlation/penyedia masing-masing; FuwaStream tidak menampilkan iklan.
+> FuwaStream adalah aplikasi klien dan **tidak meng-host file video maupun gambar manga**. Informasi dan sumber pemutaran berasal dari API atau layanan pihak ketiga, sehingga ketersediaan konten bergantung pada layanan tersebut. Pengguna bertanggung jawab mematuhi hukum, hak cipta, dan ketentuan layanan yang berlaku di wilayahnya. Nama, logo, dan aset pihak ketiga tetap milik pemegang haknya. Data dan gambar manga berasal dari [Comix](https://comix.ws), [Shinigami](https://shinigami.asia), dan [Komiku](https://komiku.org) beserta grup scanlation/penyedia masing-masing; FuwaStream tidak menampilkan iklan. Terjemahan manga Comix dihasilkan di perangkat pengguna dengan OCR + terjemahan ML Kit dan kualitasnya dapat berbeda dari terjemahan resmi.
 
 ## 🔐 Privasi &amp; kepatuhan
 

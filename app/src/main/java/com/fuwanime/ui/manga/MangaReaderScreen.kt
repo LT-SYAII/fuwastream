@@ -213,12 +213,8 @@ class MangaReaderViewModel(
 
     init { open(firstChapterId) }
 
-    private fun isMangaDexId(id: String) = !isShinigamiId(id) && !isKomikuId(id) && !isComixId(id)
-
-    /** A MangaDex title or merged MangaDex chapter can't load when the ISP blocks the API. */
-    private fun errorText(e: Throwable, sourceId: String): UiText = when {
+    private fun errorText(e: Throwable): UiText = when {
         e is UiTextException -> e.text
-        !repo.mangaDexReachable && (isMangaDexId(mangaId) || isMangaDexId(sourceId)) -> UiText(R.string.manga_source_dex_down)
         else -> e.friendlyText()
     }
 
@@ -227,11 +223,7 @@ class MangaReaderViewModel(
         _state.value = _state.value.copy(chapter = null, pages = null, error = null, requestedId = chapterId)
         viewModelScope.launch {
             try {
-                val dataSaver = settings.mangaDataSaver.first()
-                // Pages don't depend on the chapter list; fetch them while the sources are merged.
-                // runCatching: a failed async child would otherwise cancel this coroutine and crash past the catch below.
-                // A downloaded chapter reads its saved images, no network.
-                val pagesJob = async { runCatching { downloads.localPages(chapterId) ?: repo.pages(chapterId, dataSaver) } }
+                val pagesJob = async { runCatching { downloads.localPages(chapterId) ?: repo.pages(chapterId) } }
                 val (manga, chapters) = try {
                     val manga = _state.value.manga ?: repo.detail(mangaId)
                     // Same merged list as the detail page (cached there), kept to the language of the opened chapter.
@@ -255,23 +247,23 @@ class MangaReaderViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.value = _state.value.copy(error = errorText(e, chapterId))
+                _state.value = _state.value.copy(error = errorText(e))
             }
         }
     }
 
-    /** MangaDex@Home URLs expire; a failed image asks for a fresh server. */
+    /** Comix image URLs can expire; a failed image asks for fresh ones. */
     fun refreshPages() {
         val chapter = _state.value.chapter ?: return
         resetTranslations()
         viewModelScope.launch {
             try {
-                val pages = repo.pages(chapter.id, settings.mangaDataSaver.first(), forceRefresh = true)
+                val pages = repo.pages(chapter.id)
                 _state.value = _state.value.copy(pages = pages, generation = _state.value.generation + 1)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.value = _state.value.copy(error = errorText(e, chapter.id))
+                _state.value = _state.value.copy(error = errorText(e))
             }
         }
     }
@@ -640,7 +632,7 @@ private fun Credit(chapter: MangaChapter, modifier: Modifier = Modifier) {
             isKomikuId(chapter.id) -> stringResource(R.string.manga_reader_source_komiku)
             isComixId(chapter.id) -> stringResource(R.string.manga_reader_source_comix)
             chapter.group != null -> stringResource(R.string.manga_reader_scanlation, chapter.group)
-            else -> stringResource(R.string.manga_reader_scanlation_unknown)
+            else -> stringResource(R.string.manga_reader_source_comix)
         },
         color = Color.White.copy(alpha = 0.6f),
         style = MaterialTheme.typography.labelMedium,

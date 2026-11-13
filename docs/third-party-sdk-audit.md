@@ -40,7 +40,6 @@ atau mengirim data pengguna. Sumber: `gradle/libs.versions.toml` + `app/build.gr
 | Tujuan | Dipanggil oleh | Data |
 | --- | --- | --- |
 | `https://xyz-api.animein.net` | Retrofit (katalog), WorkManager (notifikasi), DownloadManager (unduhan) | IP, User-Agent, permintaan katalog/stream |
-| `https://api.mangadex.org` | Retrofit (katalog manga) | IP, User-Agent, permintaan katalog |
 | `https://api.shngm.io` | Retrofit (katalog manga Shinigami) | IP, User-Agent, permintaan katalog |
 | `https://api.komiku.org` | Retrofit (katalog manga Komiku) | IP, User-Agent, permintaan katalog |
 | `https://comix.ws` | WebView tersembunyi (katalog manga Comix) | IP, User-Agent, cookie/local storage WebView |

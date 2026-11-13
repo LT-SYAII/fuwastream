@@ -76,7 +76,8 @@ android {
   }
   splits {
     abi {
-      isEnable = true
+      // AAB builds cannot use ABI splits; CI disables them for bundleRelease.
+      isEnable = (findProperty("abiSplits") as String?)?.toBooleanStrictOrNull() ?: true
       reset()
       // x86_64 keeps the CI emulator smoke test installable; phones use the arm64 build.
       include("arm64-v8a", "armeabi-v7a", "x86_64")

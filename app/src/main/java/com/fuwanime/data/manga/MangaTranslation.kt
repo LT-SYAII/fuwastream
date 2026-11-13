@@ -73,7 +73,7 @@ private data class RecognizedPage(
  * recogniser; the translation model is downloaded once and then works offline. Nothing leaves the device.
  */
 class MangaTranslator(
-    private val http: OkHttpClient,
+    @Suppress("unused") private val http: OkHttpClient,
 ) {
     private val mutex = Mutex()
     private val clientLock = Any()

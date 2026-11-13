@@ -35,7 +35,6 @@ Agar dapat menampilkan konten, aplikasi terhubung langsung dari perangkat ke:
 | Layanan | Tujuan | Data yang terlihat oleh layanan |
 | --- | --- | --- |
 | `xyz-api.animein.net` | Katalog anime, jadwal, poster, tautan aliran video | Alamat IP, User-Agent, permintaan katalog |
-| `api.mangadex.org` | Katalog, chapter, dan gambar manga | Alamat IP, User-Agent, permintaan katalog |
 | `api.shngm.io` | Katalog dan chapter manga Shinigami | Alamat IP, User-Agent, permintaan katalog |
 | `api.komiku.org` | Katalog dan chapter manga Komiku | Alamat IP, User-Agent, permintaan katalog |
 | `comix.ws` + CDN gambar | Katalog, chapter, dan gambar manga Comix | Alamat IP, User-Agent, cookie/local storage WebView |
