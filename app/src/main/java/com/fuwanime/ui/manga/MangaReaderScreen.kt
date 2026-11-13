@@ -118,6 +118,8 @@ import com.fuwanime.data.manga.readerLanguage
 import com.fuwanime.data.manga.withChapter
 import com.fuwanime.data.manga.MangaLibrary
 import com.fuwanime.data.manga.MangaRepository
+import com.fuwanime.data.manga.MangaTranslationException
+import com.fuwanime.data.manga.MangaTranslationFailure
 import com.fuwanime.data.manga.MangaTranslator
 import com.fuwanime.data.manga.nextChapter
 import com.fuwanime.data.manga.previousChapter
@@ -218,6 +220,16 @@ class MangaReaderViewModel(
         else -> e.friendlyText()
     }
 
+    private fun translationError(e: Exception): UiText = UiText(
+        when ((e as? MangaTranslationException)?.failure) {
+            MangaTranslationFailure.IMAGE -> R.string.manga_reader_translate_image_failed
+            MangaTranslationFailure.OCR_MODEL -> R.string.manga_reader_translate_ocr_model_failed
+            MangaTranslationFailure.OCR -> R.string.manga_reader_translate_ocr_failed
+            MangaTranslationFailure.TRANSLATION_MODEL -> R.string.manga_reader_translate_model_failed
+            MangaTranslationFailure.TRANSLATION, null -> R.string.manga_reader_translate_failed
+        },
+    )
+
     fun open(chapterId: String) {
         if (_state.value.requestedId != chapterId) resetTranslations()
         _state.value = _state.value.copy(chapter = null, pages = null, error = null, requestedId = chapterId)
@@ -305,10 +317,10 @@ class MangaReaderViewModel(
                 }
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 _translation.update {
                     it.copy(
-                        pages = it.pages + (index to ReaderPageTranslation(error = UiText(R.string.manga_reader_translate_failed))),
+                        pages = it.pages + (index to ReaderPageTranslation(error = translationError(e))),
                         modelDownloading = false,
                     )
                 }

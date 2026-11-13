@@ -6,7 +6,9 @@ import android.graphics.BitmapRegionDecoder
 import android.graphics.Color
 import android.graphics.Rect
 import android.net.Uri
+import android.util.Log
 import com.google.android.gms.tasks.Task
+import com.google.mlkit.common.MlKitException
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
@@ -23,6 +25,8 @@ import kotlin.coroutines.resumeWithException
 import kotlin.math.max
 import kotlin.math.min
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -54,6 +58,13 @@ data class PageTranslation(
     val height: Int = 0,
 )
 
+enum class MangaTranslationFailure { IMAGE, OCR_MODEL, OCR, TRANSLATION_MODEL, TRANSLATION }
+
+class MangaTranslationException(
+    val failure: MangaTranslationFailure,
+    cause: Throwable,
+) : Exception(cause.message, cause)
+
 /** A recognised text block in original page pixels, before normalising for the UI. */
 private data class RecognizedBlock(
     val text: String,
@@ -69,11 +80,11 @@ private data class RecognizedPage(
 )
 
 /**
- * On-device English → Indonesian translation for image chapters (Comix). OCR runs with ML Kit's Latin
- * recogniser; the translation model is downloaded once and then works offline. Nothing leaves the device.
+ * On-device English → Indonesian translation for image chapters (Comix). The Latin OCR model is bundled;
+ * the translation model is downloaded once and then works offline. Nothing leaves the device.
  */
 class MangaTranslator(
-    @Suppress("unused") private val http: OkHttpClient,
+    private val http: OkHttpClient,
 ) {
     private val mutex = Mutex()
     private val clientLock = Any()
@@ -102,17 +113,39 @@ class MangaTranslator(
      * the one-time model download is in progress, so the reader can show its status.
      */
     suspend fun translatePage(url: String, onDownloadingModel: () -> Unit = {}): PageTranslation = mutex.withLock {
-        val bytes = download(url)
-        val page = recognize(bytes)
+        var modelNoticeSent = false
+        val notifyModelDownload = {
+            if (!modelNoticeSent) {
+                modelNoticeSent = true
+                onDownloadingModel()
+            }
+        }
+        val bytes = stage(MangaTranslationFailure.IMAGE) { download(url) }
+        val page = try {
+            recognize(bytes, notifyModelDownload)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: MlKitException) {
+            val failure = if (e.errorCode == MlKitException.UNAVAILABLE || e.errorCode == MlKitException.NETWORK_ISSUE) {
+                MangaTranslationFailure.OCR_MODEL
+            } else {
+                MangaTranslationFailure.OCR
+            }
+            throw MangaTranslationException(failure, e)
+        } catch (e: Exception) {
+            throw MangaTranslationException(MangaTranslationFailure.OCR, e)
+        }
         if (page.blocks.isEmpty()) return@withLock PageTranslation("", emptyList(), page.width, page.height)
         if (!modelReady) {
-            onDownloadingModel()
-            translator().downloadModelIfNeeded(DownloadConditions.Builder().build()).await()
+            notifyModelDownload()
+            stage(MangaTranslationFailure.TRANSLATION_MODEL) {
+                downloadTranslationModel()
+            }
             modelReady = true
         }
         val regions = ArrayList<TranslatedBlock>(page.blocks.size)
         for (block in page.blocks) {
-            val translated = translateBlock(block.text)
+            val translated = stage(MangaTranslationFailure.TRANSLATION) { translateBlock(block.text) }
             if (translated.isBlank()) continue
             regions += TranslatedBlock(
                 left = block.rect.left.toFloat() / page.width,
@@ -164,7 +197,7 @@ class MangaTranslator(
     }
 
     /** OCR for one image, split into vertical tiles so very long webtoon strips stay within memory limits. */
-    private suspend fun recognize(bytes: ByteArray): RecognizedPage = withContext(Dispatchers.IO) {
+    private suspend fun recognize(bytes: ByteArray, onWaitingForModel: () -> Unit): RecognizedPage = withContext(Dispatchers.IO) {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         val width = bounds.outWidth
@@ -175,7 +208,7 @@ class MangaTranslator(
         if (height <= TILE_HEIGHT) {
             val (bitmap, sample) = decode(bytes, width, height) ?: throw IOException("Unsupported Comix image")
             try {
-                addBlocks(blocks, recognizeBitmap(bitmap, sample, 0, width, height))
+                addBlocks(blocks, recognizeBitmap(bitmap, sample, 0, width, height, onWaitingForModel))
             } finally {
                 bitmap.recycle()
             }
@@ -194,7 +227,7 @@ class MangaTranslator(
                     )
                     if (tile != null) {
                         try {
-                            addBlocks(blocks, recognizeBitmap(tile, sample, top, width, height))
+                            addBlocks(blocks, recognizeBitmap(tile, sample, top, width, height, onWaitingForModel))
                         } finally {
                             tile.recycle()
                         }
@@ -224,8 +257,10 @@ class MangaTranslator(
         topOffset: Int,
         imageWidth: Int,
         imageHeight: Int,
+        onWaitingForModel: () -> Unit,
     ): List<RecognizedBlock> {
-        val result = recognizer().process(InputImage.fromBitmap(bitmap, 0)).await()
+        val image = InputImage.fromBitmap(bitmap, 0)
+        val result = recognizeWithModelRetry(image, onWaitingForModel)
         return result.textBlocks.mapNotNull { block ->
             val text = block.text.trim()
             if (text.count(Char::isLetterOrDigit) < 2) return@mapNotNull null
@@ -314,12 +349,60 @@ class MangaTranslator(
         addOnCanceledListener { continuation.cancel() }
     }
 
+    /** The unbundled OCR model can still be downloading when the first page opens. Retry instead of failing it. */
+    private suspend fun recognizeWithModelRetry(image: InputImage, onWaitingForModel: () -> Unit): com.google.mlkit.vision.text.Text {
+        repeat(OCR_MODEL_RETRIES) { attempt ->
+            try {
+                return recognizer().process(image).await()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: MlKitException) {
+                val waiting = e.errorCode == MlKitException.UNAVAILABLE || e.errorCode == MlKitException.NETWORK_ISSUE
+                if (!waiting || attempt == OCR_MODEL_RETRIES - 1) throw e
+                onWaitingForModel()
+                delay(OCR_MODEL_RETRY_MS)
+            }
+        }
+        error("OCR retry loop ended unexpectedly")
+    }
+
+    private suspend fun downloadTranslationModel() {
+        repeat(TRANSLATION_MODEL_RETRIES) { attempt ->
+            try {
+                translator().downloadModelIfNeeded(DownloadConditions.Builder().build()).await()
+                return
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: MlKitException) {
+                val transient = e.errorCode == MlKitException.UNAVAILABLE || e.errorCode == MlKitException.NETWORK_ISSUE
+                if (!transient || attempt == TRANSLATION_MODEL_RETRIES - 1) throw e
+                delay(TRANSLATION_MODEL_RETRY_MS)
+            }
+        }
+    }
+
+    private suspend fun <T> stage(failure: MangaTranslationFailure, block: suspend () -> T): T = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: MangaTranslationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.w(TAG, "Manga translation failed at $failure: ${e.message}", e)
+        throw MangaTranslationException(failure, e)
+    }
+
     private companion object {
         const val USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
         const val TILE_HEIGHT = 2_400
         const val TILE_OVERLAP = 120
         const val MAX_WIDTH = 2_000
         const val MAX_PIXELS = 8_000_000L
+        const val OCR_MODEL_RETRIES = 20
+        const val OCR_MODEL_RETRY_MS = 1_500L
+        const val TRANSLATION_MODEL_RETRIES = 3
+        const val TRANSLATION_MODEL_RETRY_MS = 2_000L
+        const val TAG = "MangaTranslator"
         val WHITESPACE = Regex("\\s+")
     }
 }

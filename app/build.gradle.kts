@@ -120,7 +120,8 @@ dependencies {
   baselineProfile(project(":baselineprofile"))
   implementation(libs.okhttp.logging)
   implementation(libs.mlkit.translate)
-  implementation(libs.play.services.mlkit.text.recognition)
+  // Bundle the small Latin OCR model: translation must work on sideloaded/non-GMS devices from first use.
+  implementation(libs.mlkit.text.recognition)
   implementation(libs.retrofit)
   implementation(libs.retrofit.converter.moshi)
   ksp(libs.androidx.room.compiler)
