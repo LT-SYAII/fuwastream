@@ -56,59 +56,66 @@ private fun Map<String, Any?>.firstInt(vararg keys: String): Int? =
     keys.firstNotNullOfOrNull { int(it) }
 private fun Map<String, Any?>.tagNames(vararg keys: String): List<String> =
     keys.flatMap { this[it].list() }
-        .mapNotNull { it.map().firstString("Z2", "k_", "rf", "title") }
+        .mapNotNull { item ->
+            (item as? String)?.takeIf(String::isNotBlank)
+                ?: item.map().firstString("title", "Z2", "k_", "rf")
+        }
         .distinct()
 
 private fun absoluteComixUrl(path: String?): String? = path?.let { if (it.startsWith("http")) it else COMIX_ORIGIN + it }
 
 internal fun comixManga(data: Any?): Manga {
     val m = data.map()
-    val hid = m.firstString("rU", "SZ", "fH", "hid").orEmpty()
-    val title = m.firstString("Z2", "k_", "rf", "title").orEmpty()
-    val poster = m["P7"].map().ifEmpty { m["fL"].map() }.ifEmpty { m["Zs"].map() }.ifEmpty { m["poster"].map() }
+    val hid = m.firstString("hid", "rU", "SZ", "fH").orEmpty()
+    val title = m.firstString("title", "Z2", "k_", "rf").orEmpty()
+    val poster = m["poster"].map().ifEmpty { m["P7"].map() }.ifEmpty { m["fL"].map() }.ifEmpty { m["Zs"].map() }
     return Manga(
         id = CX_PREFIX + hid,
         title = title,
-        coverUrl = absoluteComixUrl(poster.firstString("cT", "Tr", "sP", "HS", "QC", "Kq", "medium", "large")),
-        description = m.firstString("Ht", "U$", "U7", "fK", "synopsis").orEmpty(),
-        tags = m.tagNames("_v", "Tw", "QT", "Il", "Dx", "gS", "UR", "J5", "hV", "A5", "dE"),
-        status = when (m.firstString("cB", "yx", "oF", "status")) {
+        coverUrl = absoluteComixUrl(poster.firstString("large", "medium", "cT", "Tr", "sP", "HS", "QC", "Kq")),
+        description = m.firstString("synopsis", "Ht", "U$", "U7", "fK").orEmpty(),
+        tags = m.tagNames("tags", "_v", "Tw", "QT", "Il", "Dx", "gS", "UR", "J5", "hV", "A5", "dE"),
+        status = when (m.firstString("status", "cB", "yx", "oF")) {
             "releasing" -> MangaStatus.ONGOING
             "finished" -> MangaStatus.COMPLETED
             "on_hiatus" -> MangaStatus.HIATUS
             "discontinued" -> MangaStatus.CANCELLED
             else -> MangaStatus.UNKNOWN
         },
-        year = m.firstInt("Hb", "Pi", "Pa", "_r", "year"),
-        author = (m["TH"].list().ifEmpty { m["NR"].list() }).mapNotNull { it.map().firstString("Z2", "k_", "rf", "title") }
+        year = m.firstInt("year", "Hb", "Pi", "Pa", "_r"),
+        author = m["authors"].list().ifEmpty { m["TH"].list() }.ifEmpty { m["NR"].list() }
+            .mapNotNull { item -> (item as? String) ?: item.map().firstString("title", "Z2", "k_", "rf") }
             .joinToString().ifBlank { null }
             ?: m["ZN"].list().ifEmpty { m["uy"].list() }.mapNotNull { it.map().firstString("Z2", "k_", "rf") }
                 .joinToString().ifBlank { null },
-        altTitles = m["Jy"].list().ifEmpty { m["Hv"].list() }.ifEmpty { m["Ga"].list() }
+        altTitles = m["altTitles"].list().ifEmpty { m["Jy"].list() }.ifEmpty { m["Hv"].list() }.ifEmpty { m["Ga"].list() }
             .mapNotNull { it?.toString() }.filter { it != title },
-        type = m.firstString("ei", "nv", "GR", "type")?.replaceFirstChar(Char::uppercase),
+        type = m.firstString("type", "ei", "nv", "GR")?.replaceFirstChar(Char::uppercase),
     )
 }
 
 internal fun comixChapter(data: Any?, hid: String): MangaChapter {
     val c = data.map()
-    val id = c.firstInt("VT", "hk", "kM") ?: 0
+    val id = c.firstInt("id", "VT", "hk", "kM") ?: 0
     return MangaChapter(
         id = "$CX_PREFIX$hid:$id",
-        number = c.firstString("PD", "Z_", "Xn")?.removeSuffix(".0"),
-        title = c.firstString("q1", "nb", "f9")?.takeIf { it.isNotBlank() },
-        language = c.firstString("Ax", "aK", "FP") ?: "en",
-        group = c["qz"].map().ifEmpty { c["rk"].map() }.firstString("q1", "nb", "f9") ?: c["gm"].map().string("f9") ?: "Comix",
-        pages = c.firstInt("QQ") ?: 1,
+        number = c.firstString("number", "PD", "Z_", "Xn")?.removeSuffix(".0"),
+        title = c.firstString("title", "q1", "nb", "f9")?.takeIf { it.isNotBlank() },
+        language = c.firstString("language", "Ax", "aK", "FP") ?: "en",
+        group = c.firstString("group")
+            ?: c["qz"].map().ifEmpty { c["rk"].map() }.firstString("q1", "nb", "f9")
+            ?: c["gm"].map().string("f9")
+            ?: "Comix",
+        pages = c.firstInt("pages", "QQ") ?: 1,
         externalUrl = null,
-        publishAt = parseComixRelativeTime(c.firstString("iS")),
+        publishAt = parseComixRelativeTime(c.firstString("relativeTime", "iS")),
     )
 }
 
 internal fun comixPageUrls(data: Any?): List<String> {
     val m = data.map()
-    return m["sN"].list().ifEmpty { m["iE"].list() }.ifEmpty { m["iT"].list() }
-        .mapNotNull { it.map().firstString("FM", "Gh", "H$") }
+    return m["pages"].list().ifEmpty { m["sN"].list() }.ifEmpty { m["iE"].list() }.ifEmpty { m["iT"].list() }
+        .mapNotNull { it.map().firstString("url", "FM", "Gh", "H$") }
         .filter { it.startsWith("https://") }
 }
 
@@ -170,10 +177,10 @@ class ComixWsSource(
         tagIds.mapNotNull { it.toIntOrNull() }.takeIf { it.isNotEmpty() }?.let { params["genres_in"] = it }
         status?.comixValue()?.let { params["statuses"] = listOf(it) }
         val result = runtime.call("browse", params).map()
-        val items = result["s3"].list().ifEmpty { result["I7"].list() }.ifEmpty { result["EY"].list() }
+        val items = result["items"].list().ifEmpty { result["s3"].list() }.ifEmpty { result["I7"].list() }.ifEmpty { result["EY"].list() }
             .map(::comixManga).filter { it.id != CX_PREFIX && it.title.isNotBlank() }
-        val meta = result["om"].map().ifEmpty { result["aY"].map() }.ifEmpty { result["\$U"].map() }
-        val total = meta.firstInt("Yl", "T8", "fc") ?: items.size
+        val meta = result["meta"].map().ifEmpty { result["om"].map() }.ifEmpty { result["aY"].map() }.ifEmpty { result["\$U"].map() }
+        val total = meta.firstInt("total", "Yl", "T8", "fc") ?: items.size
         return MangaPage(items, total, (page - 1) * PAGE_SIZE)
     }
 
@@ -197,12 +204,12 @@ class ComixWsSource(
                     "options" to mapOf("limit" to CHAPTER_LIMIT, "page" to page, "order" to mapOf("number" to "desc")),
                 ),
             ).map()
-            val items = result["s3"].list().ifEmpty { result["I7"].list() }.ifEmpty { result["EY"].list() }
+            val items = result["items"].list().ifEmpty { result["s3"].list() }.ifEmpty { result["I7"].list() }.ifEmpty { result["EY"].list() }
             all += items.map { comixChapter(it, hid) }.filter { it.language == "en" || it.language.isBlank() }
-            val meta = result["om"].map().ifEmpty { result["aY"].map() }.ifEmpty { result["\$U"].map() }
-            val total = meta.firstInt("Yl", "T8", "fc") ?: items.size
-            val perPage = meta.firstInt("wt", "f6") ?: CHAPTER_LIMIT
-            val pages = meta.firstInt("zq") ?: if (perPage > 0) (total + perPage - 1) / perPage else 1
+            val meta = result["meta"].map().ifEmpty { result["om"].map() }.ifEmpty { result["aY"].map() }.ifEmpty { result["\$U"].map() }
+            val total = meta.firstInt("total", "Yl", "T8", "fc") ?: items.size
+            val perPage = meta.firstInt("limit", "wt", "f6") ?: CHAPTER_LIMIT
+            val pages = meta.firstInt("pages", "zq") ?: if (perPage > 0) (total + perPage - 1) / perPage else 1
             lastPage = pages.coerceAtMost(MAX_CHAPTER_PAGES)
             page++
         } while (page <= lastPage)
@@ -234,7 +241,7 @@ class ComixWsSource(
                         val number = detail.firstInt("hb", "latestChapter")
                         val chapterId = Regex("/title/[^/]+/(\\d+)-chapter-").find(latestUrl)?.groupValues?.getOrNull(1)?.toIntOrNull()
                             ?: return@runCatching null
-                        val publishAt = parseComixRelativeTime(detail.firstString("sO", "chapterUpdatedAtFormatted"))
+                        val publishAt = parseComixRelativeTime(detail.firstString("relativeTime", "sO", "chapterUpdatedAtFormatted"))
                         MangaRelease(m.id, m.title, "$CX_PREFIX$hid:$chapterId", number?.toString(), publishAt)
                     }.getOrNull()
                 }
@@ -423,39 +430,177 @@ private class ComixWebRuntime(private val app: Application, private val http: Ok
             (async () => {
               const token = ${jsString(token)};
               try {
-                let api = window.__fuwaComixApi;
-                if (!api) {
+                let runtime = window.__fuwaComixApi;
+                if (!runtime) {
                   const main = [...document.scripts].map(s => s.src).find(s => /\/main-[^/]+\.js(?:\?|$)/.test(s));
                   if (!main) throw new Error('Comix main module not found');
-                  const source = await (await fetch(main)).text();
-                  const match = source.match(/apicore-[A-Za-z0-9_-]+\.js/);
-                  if (!match) throw new Error('Comix API module not found');
-                  api = await import(new URL(match[0], main).href);
-                  window.__fuwaComixApi = api;
-                }
-                const groups = Object.values(api).filter(v => v && typeof v === 'object');
-                const find = (test) => {
-                  for (const group of groups) {
-                    try { if (test(group)) return group; } catch (_) {}
+                  const mainSource = await (await fetch(main)).text();
+                  const apiFile = mainSource.match(/apicore-[A-Za-z0-9_-]+\.js/)?.[0];
+                  if (!apiFile) throw new Error('Comix API module not found');
+                  const apiUrl = new URL(apiFile, main).href;
+                  const [apiSource, api] = await Promise.all([
+                    fetch(apiUrl).then(r => r.text()),
+                    import(apiUrl),
+                  ]);
+
+                  // Comix rotates every minified method and response key on deployment. Resolve the read methods
+                  // from the site's own call sites instead of pinning names such as QJ/Tm/OJ.
+                  const ID = '[A-Za-z_$][\\w$]*';
+                  const rx = s => s.replace(/\$/g, '\\$');
+                  const browseUse = mainSource.match(new RegExp(
+                    '"chapter_updated_at":"desc"[\\s\\S]{0,3000}?"queryFn":\\(\\)=>\\s*(' + ID + ')\\.(' + ID + ')\\('
+                  ));
+                  if (!browseUse) throw new Error('Comix browse method not found');
+                  const alias = browseUse[1];
+                  const browseMethod = browseUse[2];
+                  const detailUse = mainSource.match(new RegExp(
+                    '"queryFn":\\(\\)=>' + rx(alias) + '\\.(' + ID + ')\\((' + ID + ')\\),"enabled":!!\\2,"placeholderData"'
+                  ));
+                  if (!detailUse) throw new Error('Comix detail method not found');
+                  const detailMethod = detailUse[1];
+                  const chaptersAt = mainSource.indexOf('"mpage__chapters"');
+                  const beforeChapters = mainSource.slice(Math.max(0, chaptersAt - 6000), chaptersAt);
+                  const chapterUses = [...beforeChapters.matchAll(new RegExp(
+                    '\\b' + rx(alias) + '\\.(' + ID + ')\\(([^)]*)\\)', 'g'
+                  ))];
+                  const chaptersMethod = chapterUses.at(-1)?.[1];
+                  if (!chaptersMethod) throw new Error('Comix chapters method not found');
+
+                  const imports = [...mainSource.matchAll(/import\{([^}]*)\}from["']([^"']*apicore-[^"']+\.js)["']/g)];
+                  const importBlock = imports.find(m => m[2].endsWith(apiFile))?.[1] ?? '';
+                  const exportUse = importBlock.match(new RegExp(
+                    '(?:^|,)\\s*(' + ID + ')\\s+as\\s+' + rx(alias) + '\\s*(?:,|$)'
+                  ));
+                  const catalogue = api[exportUse?.[1] ?? 'f'];
+
+                  // The reader is exported as `n`; discover its first (chapter-detail) method from the module source.
+                  const readerLocal = apiSource.slice(-4000).match(new RegExp('(' + ID + ')\\s+as\\s+n(?:,|})'))?.[1];
+                  const readerAssign = readerLocal && apiSource.match(new RegExp(
+                    rx(readerLocal) + '=(' + ID + ')\\((' + ID + ')\\)'
+                  ));
+                  const wrapper = readerAssign?.[1];
+                  const readerObject = readerAssign?.[2];
+                  const readerBody = readerObject && apiSource.match(new RegExp(
+                    '(?:var|let|const)?\\s*' + rx(readerObject) + '=(\\{[\\s\\S]*?\\}),' +
+                    rx(readerLocal) + '=' + rx(wrapper) + '\\(' + rx(readerObject) + '\\)'
+                  ))?.[1];
+                  const readerMethod = readerBody?.match(new RegExp(
+                    '^\\{(?:async)?["\']?(' + ID + ')["\']?\\s*(?::|\\()'
+                  ))?.[1];
+                  const reader = api.n;
+                  const methods = { browse: browseMethod, detail: detailMethod, chapters: chaptersMethod, reader: readerMethod };
+                  for (const [name, owner] of [['browse', catalogue], ['detail', catalogue], ['chapters', catalogue], ['reader', reader]]) {
+                    if (typeof owner?.[methods[name]] !== 'function') throw new Error('Comix ' + name + ' method is invalid');
                   }
-                  return null;
+                  runtime = { catalogue, reader, methods };
+                  window.__fuwaComixApi = runtime;
+                }
+
+                // Normalize rotating output keys into stable names before crossing the Android bridge.
+                const isObject = x => x && typeof x === 'object' && !Array.isArray(x);
+                const isRelative = x => typeof x === 'string' && /^\d+\s*(?:m|h|d|w|mo|mos|y|yr|yrs)\s+ago$/i.test(x);
+                const label = o => isObject(o)
+                  ? Object.values(o).find(v => typeof v === 'string' && v.trim() && !v.startsWith('/') && !v.startsWith('http'))
+                  : null;
+                const normalizeManga = x => {
+                  const entries = Object.entries(isObject(x) ? x : {});
+                  const strings = entries.filter(([, v]) => typeof v === 'string');
+                  const paths = strings.map(([, v]) => v).filter(v => v.startsWith('/title/'));
+                  const mangaUrl = paths.find(v => !/(?:\/|^)\d+-chapter-/.test(v)) ?? paths[0] ?? '';
+                  const hidPair = strings.find(([, v]) => mangaUrl.includes('/title/' + v + '-') || mangaUrl.includes('/title/' + v + '/'));
+                  const hid = hidPair?.[1] ?? '';
+                  const hidIndex = hidPair ? entries.findIndex(([key]) => key === hidPair[0]) : -1;
+                  const reserved = new Set([
+                    'manga', 'manhwa', 'manhua', 'other', 'releasing', 'finished', 'on_hiatus',
+                    'discontinued', 'not_yet_released', 'safe', 'suggestive', 'erotica', 'pornographic'
+                  ]);
+                  const title = (hidIndex >= 0 && typeof entries[hidIndex + 1]?.[1] === 'string' ? entries[hidIndex + 1][1] : null)
+                    ?? strings.map(([, v]) => v).find(v => v && !reserved.has(v) && !v.startsWith('/') && !isRelative(v) && !/^\d{4}$/.test(v))
+                    ?? '';
+                  const type = strings.map(([, v]) => v).find(v => ['manga', 'manhwa', 'manhua', 'other'].includes(v)) ?? null;
+                  const status = strings.map(([, v]) => v).find(v => ['releasing', 'finished', 'on_hiatus', 'discontinued', 'not_yet_released'].includes(v)) ?? null;
+                  const covers = Object.values(x ?? {}).filter(isObject)
+                    .flatMap(o => Object.values(o).filter(v => typeof v === 'string' && v.includes('/images/covers/')));
+                  const medium = covers.find(v => v.includes('@280')) ?? covers[0] ?? null;
+                  const large = covers.find(v => !v.includes('@280')) ?? covers.at(-1) ?? null;
+                  const excluded = v => !v || v === hid || v === title || reserved.has(v) || v.startsWith('/') ||
+                    v.startsWith('http') || isRelative(v) || /^\d{4}$/.test(v) || v === '?';
+                  const synopsis = strings.map(([, v]) => v).filter(v => !excluded(v) && v.length > 20)
+                    .sort((a, b) => b.length - a.length)[0] ?? '';
+                  const yearText = strings.map(([, v]) => v).find(v => /^\d{4}$/.test(v) && +v >= 1800 && +v <= 2100);
+                  const year = yearText ? +yearText : (Object.values(x ?? {}).find(v => typeof v === 'number' && v >= 1800 && v <= 2100) ?? null);
+                  const arrays = Object.values(x ?? {}).filter(Array.isArray);
+                  const altTitles = arrays.find(a => a.length && a.every(v => typeof v === 'string')) ?? [];
+                  const labelArrays = arrays.filter(a => a.length && a.every(isObject) && a.some(o => label(o)));
+                  const tags = labelArrays.slice(0, 4).flatMap(a => a.map(label).filter(Boolean));
+                  const authors = labelArrays.slice(4, 6).flatMap(a => a.map(label).filter(Boolean));
+                  const chapterInfo = paths.filter(v => /\/\d+-chapter-/.test(v)).map(url => {
+                    const match = url.match(/\/(\d+)-chapter-([^/?]+)/);
+                    return { url, id: +(match?.[1] ?? 0), number: match?.[2] ?? '' };
+                  }).filter(v => v.id).sort((a, b) => (parseFloat(a.number) || 0) - (parseFloat(b.number) || 0));
+                  const first = chapterInfo[0];
+                  const latest = chapterInfo.at(-1);
+                  return {
+                    hid, title, type, status, poster: { medium, large }, synopsis, year, altTitles, tags, authors,
+                    url: mangaUrl, latestChapter: latest?.number ?? null, latestChapterUrl: latest?.url ?? null,
+                    firstChapterUrl: first?.url ?? null, relativeTime: strings.map(([, v]) => v).find(isRelative) ?? null,
+                  };
                 };
-                // The site's minified export letters change on deploy; find modules by the methods they expose.
-                const catalogue = find(g => ['QJ', 'Tm', 'OJ', 'kC', 'Aj', 'cr', 'IX', 'zf'].every(n => typeof g[n] === 'function'));
-                if (!catalogue) throw new Error('Comix catalogue module not found');
+                const normalizeChapter = x => {
+                  const entries = Object.entries(isObject(x) ? x : {});
+                  const strings = entries.filter(([, v]) => typeof v === 'string');
+                  const url = strings.map(([, v]) => v).find(v => /\/title\/.*\/\d+-chapter-/.test(v)) ?? '';
+                  const match = url.match(/\/(\d+)-chapter-([^/?]+)/);
+                  const languagePair = strings.find(([, v]) => /^(?:en|id|ja|ko|zh|zh-hk)$/.test(v));
+                  const languageIndex = languagePair ? entries.findIndex(([key]) => key === languagePair[0]) : -1;
+                  const title = languageIndex > 0 && typeof entries[languageIndex - 1][1] === 'string'
+                    ? (entries[languageIndex - 1][1] || null) : null;
+                  const group = Object.values(x ?? {}).filter(isObject).map(label).find(Boolean) ?? null;
+                  return {
+                    id: +(match?.[1] ?? 0), number: match?.[2] ?? null, title,
+                    language: languagePair?.[1] ?? 'en', group, pages: 1, url,
+                    relativeTime: strings.map(([, v]) => v).find(isRelative) ?? null,
+                  };
+                };
+                const normalizeMeta = (x, options = {}) => {
+                  const object = Object.values(x ?? {}).find(v => isObject(v) && Object.values(v).filter(n => typeof n === 'number').length >= 2) ?? {};
+                  // Pagination mapper order is stable even though every property name rotates: total, limit,
+                  // current page, last page, first item, last item, has next, has previous.
+                  const numbers = Object.values(object).filter(n => typeof n === 'number' && Number.isFinite(n));
+                  return {
+                    total: numbers[0] ?? 0,
+                    limit: numbers[1] ?? options.limit ?? 0,
+                    page: numbers[2] ?? options.page ?? 1,
+                    pages: numbers[3] ?? 1,
+                  };
+                };
+                const normalizeList = (x, options, mapper) => ({
+                  items: (Object.values(x ?? {}).find(Array.isArray) ?? []).map(mapper),
+                  meta: normalizeMeta(x, options),
+                });
+                const normalizeReader = x => {
+                  const arrays = Object.values(x ?? {}).filter(Array.isArray);
+                  const pages = arrays.find(a => a.length && a.every(isObject) &&
+                    a.some(o => Object.values(o).some(v => typeof v === 'string' && v.startsWith('https://')))) ?? [];
+                  return {
+                    pages: pages.map(o => ({ url: Object.values(o).find(v => typeof v === 'string' && v.startsWith('https://')) }))
+                      .filter(p => p.url),
+                  };
+                };
+
                 const op = ${jsString(operation)};
                 const arg = $arg;
                 let result;
                 if (op === 'browse') {
-                  result = await catalogue.QJ(arg);
+                  result = normalizeList(await runtime.catalogue[runtime.methods.browse](arg), arg, normalizeManga);
                 } else if (op === 'detail') {
-                  result = await catalogue.Tm(arg);
+                  result = normalizeManga(await runtime.catalogue[runtime.methods.detail](arg));
                 } else if (op === 'chapters') {
-                  result = await catalogue.OJ(arg.hid, arg.options);
+                  result = normalizeList(
+                    await runtime.catalogue[runtime.methods.chapters](arg.hid, arg.options), arg.options, normalizeChapter
+                  );
                 } else if (op === 'reader') {
-                  const chapter = find(g => typeof g.Tm === 'function' && typeof g.tA === 'function' && typeof g.QJ !== 'function');
-                  if (!chapter) throw new Error('Comix chapter module not found');
-                  result = await chapter.Tm(arg);
+                  result = normalizeReader(await runtime.reader[runtime.methods.reader](arg));
                 } else {
                   throw new Error('Unknown Comix operation');
                 }

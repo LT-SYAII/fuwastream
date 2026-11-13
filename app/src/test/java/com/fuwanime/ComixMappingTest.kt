@@ -11,6 +11,47 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ComixMappingTest {
+    @Test fun mapsStableBridgeOutput() {
+        val manga = comixManga(
+            mapOf(
+                "hid" to "x0ynk",
+                "title" to "Villains Are Destined to Die",
+                "type" to "manhwa",
+                "status" to "finished",
+                "poster" to mapOf("medium" to "/images/covers/x@280.jpg", "large" to "/images/covers/x.jpg"),
+                "synopsis" to "A villain story.",
+                "year" to 2020,
+                "altTitles" to listOf("Alt Name"),
+                "tags" to listOf("Action", "Drama"),
+                "authors" to listOf("Author"),
+            ),
+        )
+        val chapter = comixChapter(
+            mapOf(
+                "id" to 11_723_370,
+                "number" to "214",
+                "title" to "Finale",
+                "language" to "en",
+                "group" to "TappyToon",
+                "pages" to 1,
+                "relativeTime" to "2d ago",
+            ),
+            "x0ynk",
+        )
+        val pages = comixPageUrls(mapOf("pages" to listOf(mapOf("url" to "https://cdn.example/1.webp"))))
+
+        assertEquals("cx:x0ynk", manga.id)
+        assertEquals("Villains Are Destined to Die", manga.title)
+        assertEquals("https://comix.ws/images/covers/x.jpg", manga.coverUrl)
+        assertEquals(listOf("Action", "Drama"), manga.tags)
+        assertEquals("Author", manga.author)
+        assertEquals(MangaStatus.COMPLETED, manga.status)
+        assertEquals("cx:x0ynk:11723370", chapter.id)
+        assertEquals("214", chapter.number)
+        assertEquals("TappyToon", chapter.group)
+        assertEquals(listOf("https://cdn.example/1.webp"), pages)
+    }
+
     @Test fun mapsCurrentBrowseItem() {
         val manga = comixManga(
             mapOf(
