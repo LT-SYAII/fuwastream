@@ -20,6 +20,7 @@ import com.fuwanime.FuwaApp
 import com.fuwanime.MainActivity
 import com.fuwanime.R
 import com.fuwanime.data.isNewerRelease
+import com.fuwanime.data.selectApkUrl
 import com.fuwanime.data.remote.GitHubApi
 import com.fuwanime.util.localizedContext
 import kotlinx.coroutines.flow.first
@@ -50,8 +51,7 @@ class AppUpdateWorker(context: Context, params: WorkerParameters) : CoroutineWor
 
         val title = release.name?.takeIf { it.isNotBlank() } ?: "FuwaStream ${release.tagName.removePrefix("v")}"
         val pageUrl = release.htmlUrl
-        val apkUrl = release.assets.lastOrNull { it.name.endsWith(".apk") }?.url
-            ?: release.assets.firstOrNull()?.url
+        val apkUrl = selectApkUrl(release.assets)
 
         val posted = AppUpdateNotifier(applicationContext).notifyUpdate(
             tag = release.tagName,

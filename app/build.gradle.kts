@@ -74,6 +74,15 @@ android {
     includeInApk = false
     includeInBundle = false
   }
+  splits {
+    abi {
+      isEnable = true
+      reset()
+      // x86_64 keeps the CI emulator smoke test installable; phones use the arm64 build.
+      include("arm64-v8a", "armeabi-v7a", "x86_64")
+      isUniversalApk = false
+    }
+  }
 }
 
 dependencies {
@@ -110,7 +119,7 @@ dependencies {
   baselineProfile(project(":baselineprofile"))
   implementation(libs.okhttp.logging)
   implementation(libs.mlkit.translate)
-  implementation(libs.mlkit.text.recognition)
+  implementation(libs.play.services.mlkit.text.recognition)
   implementation(libs.retrofit)
   implementation(libs.retrofit.converter.moshi)
   ksp(libs.androidx.room.compiler)

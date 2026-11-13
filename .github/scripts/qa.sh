@@ -63,7 +63,9 @@ upgrade_from_release() {
   gh release download --repo "${GITHUB_REPOSITORY:-SakamotoMrX/fuwanime}" --pattern '*.apk' -D /tmp/old >/dev/null 2>&1 \
     || { echo "upgrade: skipped (no release apk)" | tee -a "$OUT/qa-checks.txt"; return; }
   adb uninstall "$PKG" >/dev/null 2>&1
-  adb install "$(ls /tmp/old/*.apk | head -1)" >/dev/null || { echo "upgrade: skipped (old apk install failed)" | tee -a "$OUT/qa-checks.txt"; adb install -r "$APK"; return; }
+  OLD_APK=$(ls /tmp/old/*x86_64*.apk 2>/dev/null | head -1)
+  [ -n "$OLD_APK" ] || OLD_APK=$(ls /tmp/old/*.apk | head -1)
+  adb install "$OLD_APK" >/dev/null || { echo "upgrade: skipped (old apk install failed)" | tee -a "$OUT/qa-checks.txt"; adb install -r "$APK"; return; }
   adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS || true
   fresh
   tap "Tonton"; sleep 5; scroll_to "Episode 1" && tap "Episode 1"; sleep 20
