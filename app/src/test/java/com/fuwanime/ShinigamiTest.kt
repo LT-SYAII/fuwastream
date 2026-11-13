@@ -78,7 +78,9 @@ class ShinigamiTest {
         assertTrue(sameTitle("Love", "Love", emptyList()))
     }
 
-    @Test fun dohCoversIndonesianMangaHosts() {
+    @Test fun dohCoversMangaHosts() {
+        assertTrue(needsDoh("comix.ws"))
+        assertTrue(needsDoh("cdn.comix.ws"))
         assertTrue(needsDoh("api.shngm.io"))
         assertTrue(needsDoh("assets.shngm.id"))
         assertTrue(needsDoh("komiku.org"))

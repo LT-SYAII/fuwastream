@@ -7,10 +7,12 @@ import android.os.Looper
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.annotation.Keep
 import com.squareup.moshi.Moshi
+import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -138,9 +140,9 @@ private fun comixParts(id: String): Pair<String, Int>? {
 class ComixWsSource(
     app: Application,
     private val mature: suspend () -> Boolean = { false },
-    private val client: OkHttpClient? = null,
+    private val client: OkHttpClient,
 ) {
-    private val runtime = ComixWebRuntime(app)
+    private val runtime = ComixWebRuntime(app, client)
     private val moshi = Moshi.Builder().build()
     private val jsonAdapter = moshi.adapter(Any::class.java)
 
@@ -256,9 +258,8 @@ class ComixWsSource(
 
     /** Genre ids and names from Comix's server-rendered browse options; stable across client-module deploys. */
     suspend fun tags(): List<MangaTag> = withContext(Dispatchers.IO) {
-        val http = client ?: return@withContext emptyList()
         val request = Request.Builder().url("$COMIX_ORIGIN/browse").header("User-Agent", COMIX_USER_AGENT).build()
-        val html = http.newCall(request).execute().use { response ->
+        val html = client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return@withContext emptyList()
             response.body?.string().orEmpty()
         }
@@ -286,7 +287,7 @@ class ComixWsSource(
     }
 }
 
-private class ComixWebRuntime(private val app: Application) {
+private class ComixWebRuntime(private val app: Application, private val http: OkHttpClient) {
     private val moshi = Moshi.Builder().build()
     private val jsonAdapter = moshi.adapter(Any::class.java)
     private val mutex = Mutex()
@@ -295,7 +296,6 @@ private class ComixWebRuntime(private val app: Application) {
     private var webView: WebView? = null
     private var pageReady = false
     private var pageContinuation: Continuation<Unit>? = null
-    private var pageError: Throwable? = null
 
     suspend fun call(operation: String, argument: Any?): Any? = mutex.withLock {
         try {
@@ -320,9 +320,12 @@ private class ComixWebRuntime(private val app: Application) {
     }
 
     /** Loads the site once; later calls reuse the page and the already-imported API module. */
+    @SuppressLint("SetJavaScriptEnabled")
     private suspend fun ensurePage() {
         if (pageReady) return
-        pageError?.let { pageError = null; throw it }
+        // WebView uses Android's system DNS and can receive an ISP block page. Fetch the shell with the same
+        // OkHttp client as the rest of the app, then keep the comix.ws origin while WebView executes it.
+        val html = withContext(Dispatchers.IO) { fetchHtml() }
         suspendCancellableCoroutine<Unit> { continuation ->
             val view = webView ?: WebView(app).also { created ->
                 created.settings.javaScriptEnabled = true
@@ -334,8 +337,14 @@ private class ComixWebRuntime(private val app: Application) {
             pageContinuation = continuation
             continuation.invokeOnCancellation { if (pageContinuation === continuation) pageContinuation = null }
             view.webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                    val scheme = request.url.scheme
+                    if (scheme != "http" && scheme != "https") return null
+                    return runCatching { proxy(request) }.getOrElse { errorResponse(it) }
+                }
+
                 override fun onPageFinished(view: WebView, url: String) {
-                    if (!url.startsWith(COMIX_ORIGIN)) return
+                    if (pageContinuation == null) return
                     pageReady = true
                     pageContinuation?.resume(Unit)
                     pageContinuation = null
@@ -345,14 +354,68 @@ private class ComixWebRuntime(private val app: Application) {
                     if (!request.isForMainFrame) return
                     pageReady = false
                     val failure = IOException("Comix WebView ${error.errorCode}: ${error.description}")
-                    pageError = failure
                     pageContinuation?.resumeWithException(failure)
                     pageContinuation = null
                 }
             }
-            view.loadUrl("$COMIX_ORIGIN/browse")
+            view.loadDataWithBaseURL("$COMIX_ORIGIN/browse", html, "text/html", "UTF-8", null)
         }
     }
+
+    private fun fetchHtml(): String {
+        val request = Request.Builder().url("$COMIX_ORIGIN/browse").header("User-Agent", COMIX_USER_AGENT).build()
+        return http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw IOException("Comix page HTTP ${response.code}")
+            response.body?.string()?.takeIf { "id=\"initial-data\"" in it }
+                ?: throw IOException("Comix page response is invalid")
+        }
+    }
+
+    /** Proxies WebView resources and Comix API GETs through OkHttp so [MangaDns] and TLS behavior are shared. */
+    private fun proxy(webRequest: WebResourceRequest): WebResourceResponse? {
+        val method = webRequest.method.uppercase()
+        if (method != "GET" && method != "HEAD") return null
+        val url = webRequest.url.toString()
+        val builder = Request.Builder().url(url).header("User-Agent", COMIX_USER_AGENT)
+        webRequest.requestHeaders.forEach { (name, value) ->
+            if (
+                !name.equals("Host", true) &&
+                !name.equals("Connection", true) &&
+                !name.equals("Accept-Encoding", true) &&
+                !name.equals("If-None-Match", true) &&
+                !name.equals("If-Modified-Since", true)
+            ) {
+                builder.header(name, value)
+            }
+        }
+        if (method == "HEAD") builder.head() else builder.get()
+        val response = http.newCall(builder.build()).execute()
+        val body = response.body
+        val contentType = body?.contentType()
+        val mime = contentType?.let { "${it.type}/${it.subtype}" } ?: "application/octet-stream"
+        val encoding = contentType?.charset()?.name()
+        val responseHeaders = response.headers.toMultimap().mapValues { (_, values) -> values.joinToString(", ") }
+            .filterKeys { !it.equals("Content-Encoding", true) && !it.equals("Content-Length", true) }
+        val status = response.code.takeUnless { it in 300..399 } ?: 502
+        val reason = response.message.ifBlank { if (status < 400) "OK" else "Upstream error" }
+        return WebResourceResponse(
+            mime,
+            encoding,
+            status,
+            reason,
+            responseHeaders,
+            body?.byteStream() ?: ByteArrayInputStream(ByteArray(0)),
+        )
+    }
+
+    private fun errorResponse(error: Throwable): WebResourceResponse = WebResourceResponse(
+        "text/plain",
+        "UTF-8",
+        502,
+        "Comix proxy error",
+        emptyMap(),
+        ByteArrayInputStream((error.message ?: "Comix request failed").toByteArray()),
+    )
 
     private fun script(token: String, operation: String, argument: Any?): String {
         val arg = jsonAdapter.toJson(argument)
@@ -422,6 +485,9 @@ private class ComixWebRuntime(private val app: Application) {
 
         @JavascriptInterface
         fun failure(token: String, message: String) = handler.post {
+            // A deployment can rotate the module while this process is alive. Force the next retry to bootstrap again.
+            pageReady = false
+            webView?.evaluateJavascript("delete window.__fuwaComixApi", null)
             fail(token, IOException(message.take(1_000)))
         }
     }
