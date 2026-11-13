@@ -1,15 +1,21 @@
 package com.fuwanime.ui.manga
 
 import com.fuwanime.data.manga.PageTranslation
+import com.fuwanime.data.manga.TranslatedBlock
 import com.fuwanime.data.manga.isComixId
 import com.fuwanime.data.manga.isKomikuId
 import com.fuwanime.data.manga.isShinigamiId
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.graphics.Typeface
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -79,6 +85,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -88,6 +96,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.core.content.res.ResourcesCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -118,6 +127,7 @@ import com.fuwanime.util.UiTextException
 import com.fuwanime.util.friendlyText
 import com.fuwanime.util.fuwaViewModel
 import com.fuwanime.util.text
+import kotlin.math.min
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -652,6 +662,7 @@ private fun Page(
 ) {
     var status by remember(url, generation) { mutableStateOf<AsyncImagePainter.State?>(null) }
     val description = stringResource(R.string.manga_reader_page_cd, index + 1)
+    val result = translation?.translation
     Column(Modifier.fillMaxWidth()) {
         Box(
             Modifier.fillMaxWidth().then(if (status is AsyncImagePainter.State.Success) Modifier else Modifier.aspectRatio(1f / 1.4f)),
@@ -665,6 +676,9 @@ private fun Page(
                 onState = { status = it },
                 modifier = Modifier.fillMaxWidth(),
             ) }
+            if (status is AsyncImagePainter.State.Success && translationEnabled && result != null && result.regions.isNotEmpty()) {
+                TranslationOverlay(result, Modifier.matchParentSize())
+            }
             when (status) {
                 is AsyncImagePainter.State.Error -> TextButton(onClick = onFailed, modifier = Modifier.semantics { contentDescription = description }) {
                     Icon(Icons.Rounded.Refresh, null, tint = Color.White)
@@ -674,7 +688,11 @@ private fun Page(
                 else -> CircularProgressIndicator(color = Color.White.copy(alpha = 0.6f))
             }
         }
-        TranslationPanel(translation, translationEnabled, modelDownloading, onRetryTranslation)
+        // The overlay replaces the text panel once the page has positioned regions. Keep the panel for
+        // loading, errors and pages without text.
+        if (result?.regions.isNullOrEmpty()) {
+            TranslationPanel(translation, translationEnabled, modelDownloading, onRetryTranslation)
+        }
     }
 }
 
@@ -691,6 +709,7 @@ private fun ReaderPage(
     bottomPadding: Dp,
 ) {
     var status by remember(url, generation) { mutableStateOf<AsyncImagePainter.State?>(null) }
+    val result = translation?.translation
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         key(generation) {
             AsyncImage(
@@ -701,21 +720,114 @@ private fun ReaderPage(
                 modifier = Modifier.fillMaxSize(),
             )
         }
+        if (status is AsyncImagePainter.State.Success && translationEnabled && result != null && result.regions.isNotEmpty()) {
+            TranslationOverlay(result, Modifier.fillMaxSize())
+        }
         when (status) {
             is AsyncImagePainter.State.Error -> TextButton(onClick = onFailed) { Text(stringResource(R.string.manga_reader_reload), color = Color.White) }
             is AsyncImagePainter.State.Success -> Unit
             else -> CircularProgressIndicator(color = Color.White.copy(alpha = 0.6f))
         }
-        TranslationPanel(
-            state = translation,
-            enabled = translationEnabled,
-            modelDownloading = modelDownloading,
-            onRetry = onRetryTranslation,
-            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
-                .padding(start = 8.dp, end = 8.dp, bottom = bottomPadding).clip(RoundedCornerShape(12.dp)),
-            scrollable = true,
-        )
+        if (result?.regions.isNullOrEmpty()) {
+            TranslationPanel(
+                state = translation,
+                enabled = translationEnabled,
+                modelDownloading = modelDownloading,
+                onRetry = onRetryTranslation,
+                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
+                    .padding(start = 8.dp, end = 8.dp, bottom = bottomPadding).clip(RoundedCornerShape(12.dp)),
+                scrollable = true,
+            )
+        }
     }
+}
+
+/** Paints translated regions over the original image, using OCR bounding boxes and the bubble's sampled colour. */
+@Composable
+private fun TranslationOverlay(translation: PageTranslation, modifier: Modifier = Modifier) {
+    if (translation.regions.isEmpty() || translation.width <= 0 || translation.height <= 0) return
+    val context = LocalContext.current
+    val typeface = remember(context) {
+        runCatching { ResourcesCompat.getFont(context, R.font.comic_neue_bold) }.getOrNull()
+            ?: Typeface.DEFAULT_BOLD
+    }
+    Canvas(modifier) {
+        val scale = min(
+            size.width / translation.width.toFloat(),
+            size.height / translation.height.toFloat(),
+        )
+        if (!scale.isFinite() || scale <= 0f) return@Canvas
+        val contentWidth = translation.width * scale
+        val contentHeight = translation.height * scale
+        val dx = (size.width - contentWidth) / 2f
+        val dy = (size.height - contentHeight) / 2f
+        drawIntoCanvas { canvas ->
+            translation.regions.forEach { region ->
+                drawTranslatedRegion(
+                    canvas = canvas.nativeCanvas,
+                    region = region,
+                    left = dx + region.left * contentWidth,
+                    top = dy + region.top * contentHeight,
+                    right = dx + region.right * contentWidth,
+                    bottom = dy + region.bottom * contentHeight,
+                    typeface = typeface,
+                )
+            }
+        }
+    }
+}
+
+private fun drawTranslatedRegion(
+    canvas: android.graphics.Canvas,
+    region: TranslatedBlock,
+    left: Float,
+    top: Float,
+    right: Float,
+    bottom: Float,
+    typeface: Typeface,
+) {
+    val width = right - left
+    val height = bottom - top
+    if (width < 4f || height < 4f) return
+
+    val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = region.background
+        style = android.graphics.Paint.Style.FILL
+    }
+    val pad = (min(width, height) * 0.05f).coerceIn(1f, 3f)
+    canvas.drawRect(left - pad, top - pad, right + pad, bottom + pad, fill)
+
+    val text = region.text.trim()
+    if (text.isEmpty()) return
+    val paint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = region.foreground
+        this.typeface = typeface
+        isSubpixelText = true
+    }
+    val availableWidth = (width - 2f).coerceAtLeast(4f)
+    // Start large, then shrink until the wrapped block fits the bubble's OCR box.
+    var textSize = min(height * 0.9f, availableWidth * 0.45f).coerceAtLeast(5f)
+    var layout: StaticLayout? = null
+    var attempts = 0
+    while (attempts < 16) {
+        paint.textSize = textSize
+        val candidate = StaticLayout.Builder
+            .obtain(text, 0, text.length, paint, availableWidth.toInt().coerceAtLeast(4))
+            .setAlignment(Layout.Alignment.ALIGN_CENTER)
+            .setIncludePad(false)
+            .setLineSpacing(0f, 0.95f)
+            .build()
+        layout = candidate
+        if (candidate.height <= height || textSize <= 5f) break
+        textSize = (textSize * 0.86f).coerceAtLeast(5f)
+        attempts++
+    }
+    val fitted = layout ?: return
+    canvas.save()
+    canvas.clipRect(left, top, right, bottom)
+    canvas.translate(left + (width - availableWidth) / 2f, top + (height - fitted.height) / 2f)
+    fitted.draw(canvas)
+    canvas.restore()
 }
 
 /** On-device translation shown under a webtoon page, or over the bottom of a paged one. */

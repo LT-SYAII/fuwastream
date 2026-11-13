@@ -58,7 +58,7 @@
         <li><b>Jelajah</b> — cari judul, genre, atau studio; filter tipe &amp; genre; urutkan populer, terbaru, atau A–Z.</li>
         <li><b>Jadwal tayang</b> — rilis per hari lengkap dengan jamnya.</li>
         <li><b>Anime serupa &amp; season terkait</b> — langsung dari halaman detail.</li>
-        <li><b>Manga</b> — saklar Anime | Manga di Beranda &amp; Jelajah; baca chapter Indonesia/Inggris dari <a href="https://mangadex.org">MangaDex</a> dan <a href="https://comix.ws">Comix</a> dengan reader scroll vertikal, lanjut baca, favorit, mode hemat data, serta terjemahan Indonesia di perangkat untuk chapter gambar Comix.</li>
+        <li><b>Manga</b> — saklar Anime | Manga di Beranda &amp; Jelajah; baca chapter Indonesia/Inggris dari <a href="https://mangadex.org">MangaDex</a> dan <a href="https://comix.ws">Comix</a> dengan reader scroll vertikal, lanjut baca, favorit, mode hemat data, serta terjemahan Indonesia di perangkat yang ditimpa langsung ke gambar untuk chapter Comix.</li>
       </ul>
     </td>
     <td width="50%" valign="top">
@@ -213,6 +213,8 @@ Punya ide fitur atau menemukan bug? [Buat Issue](https://github.com/fuwanime/fuw
 ## 📄 Lisensi
 
 Kode sumber dilisensikan di bawah **[GNU General Public License v3.0](./LICENSE)**. Lisensi kode tidak memberikan hak atas nama, logo, merek, maupun aset FuwaStream.
+
+Font **Comic Neue** (digunakan untuk teks terjemahan yang ditimpa ke gambar manga) dibuat oleh Craig Rozynski dan dilisensikan di bawah [SIL Open Font License 1.1](https://github.com/crozynski/comicneue/blob/master/OFL.txt). Salinan lisensi disertakan di `app/src/main/assets/licenses/comic_neue_ofl.txt`.
 
 ---
 
