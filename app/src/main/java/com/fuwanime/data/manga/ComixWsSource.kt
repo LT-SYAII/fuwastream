@@ -604,7 +604,13 @@ private class ComixWebRuntime(private val app: Application, private val http: Ok
                       const strings = values.filter(v => typeof v === 'string' && !v.startsWith('http'));
                       const fallbackRoot = strings.find(v => v.includes('.'));
                       const fallbackSubdomain = strings.find(v => !v.includes('.') && !v.includes('/'));
-                      const roots = [root, domains.length ? domains[pageIndex % domains.length] : null, fallbackRoot];
+                      // The website load-balances by choosing one fallback root per page. The app keeps that
+                      // preferred root first, then every remaining root from the payload for hostile ISP networks.
+                      const preferredDomain = domains.length ? domains[pageIndex % domains.length] : null;
+                      const orderedDomains = preferredDomain
+                        ? [preferredDomain, ...domains.filter(domain => domain !== preferredDomain)]
+                        : domains;
+                      const roots = [root, ...orderedDomains, fallbackRoot];
                       const subdomains = [subdomain, fallbackSubdomain].filter(Boolean);
                       const urls = [];
                       for (const sub of subdomains) for (const domain of roots) {
