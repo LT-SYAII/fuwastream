@@ -5,11 +5,13 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.os.ParcelFileDescriptor
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.fuwanime.data.manga.Manga
 import com.fuwanime.data.manga.MangaChapter
 import com.fuwanime.data.manga.MangaOrder
@@ -74,6 +76,12 @@ class MangaTranslationInstrumentedTest {
         }
         println("translated $withText/${pages.size} pages, $withRegions with regions, $totalChars chars total")
         println("saved $saved translated page images")
+        if (saved > 0) {
+            // Gradle uninstalls the app after the test, which also deletes its external files dir. Copy the
+            // renders to shared storage from inside the test so the CI adb pull still finds them.
+            runCatching { publishEvidence(app) }
+                .onFailure { println("could not publish evidence: ${it.message}") }
+        }
         assertTrue("OCR produced no text on any page", withRegions > 0)
         // Webtoon chapters contain genuinely textless art pages; require text on a meaningful share instead.
         assertTrue("OCR text missing on most pages ($withText/${pages.size})", withText >= maxOf(1, pages.size / 4))
@@ -125,6 +133,17 @@ class MangaTranslationInstrumentedTest {
         }
     }
 
+    /** Copies the app-private renders to shared storage as the shell user, which survives the test uninstall. */
+    private fun publishEvidence(app: FuwaApp) {
+        val source = File(app.getExternalFilesDir(null), "translation-evidence").absolutePath
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val command = "rm -rf $EVIDENCE_DIR && cp -r $source $EVIDENCE_DIR"
+        val output = automation.executeShellCommand(command).use { pfd ->
+            ParcelFileDescriptor.AutoCloseInputStream(pfd).readBytes().decodeToString()
+        }
+        println("published evidence to $EVIDENCE_DIR $output")
+    }
+
     /** Mature content is a user setting; the pipeline test must stay on all-ages titles. */
     private fun isAllAges(manga: Manga): Boolean {
         val tags = manga.tags.map { it.lowercase() }
@@ -161,6 +180,7 @@ class MangaTranslationInstrumentedTest {
     private companion object {
         const val TRANSLATION_FONT = "translation_font.ttf"
         const val ACTION_GENRE = "6"
+        const val EVIDENCE_DIR = "/sdcard/Download/translation-evidence"
         const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
 

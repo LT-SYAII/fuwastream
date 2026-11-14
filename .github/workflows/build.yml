@@ -196,7 +196,7 @@ jobs:
           script: |
             gradle :app:connectedDebugAndroidTest -PabiSplits=false -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true --stacktrace
             code=$?
-            adb pull /sdcard/Android/data/com.fuwanime.app.debug/files/translation-evidence translation-evidence || true
+            adb pull /sdcard/Download/translation-evidence translation-evidence || true
             exit $code
 
       - uses: actions/upload-artifact@v4
