@@ -180,20 +180,29 @@ class MangaTranslator(
     }
 
     private suspend fun download(url: String): ByteArray = withContext(Dispatchers.IO) {
+        val candidates = mangaPageCandidates(url).ifEmpty { listOf(url) }
         // Downloaded chapters keep their pages as file: URIs; read those directly.
-        if (url.startsWith("file:")) {
-            val path = Uri.parse(url).path ?: throw IOException("Invalid local page: $url")
+        if (candidates.first().startsWith("file:")) {
+            val path = Uri.parse(candidates.first()).path ?: throw IOException("Invalid local page: ${candidates.first()}")
             return@withContext File(path).readBytes()
         }
         // The Comix CDN rejects requests that carry a Referer (403), so send none.
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", USER_AGENT)
-            .build()
-        http.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("Comix image HTTP ${response.code}")
-            response.body?.bytes() ?: throw IOException("Comix image is empty")
+        var failure: IOException? = null
+        for (candidate in candidates) {
+            try {
+                val request = Request.Builder()
+                    .url(candidate)
+                    .header("User-Agent", USER_AGENT)
+                    .build()
+                http.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) throw IOException("Comix image HTTP ${response.code}")
+                    return@withContext response.body?.bytes() ?: throw IOException("Comix image is empty")
+                }
+            } catch (e: IOException) {
+                failure = e
+            }
         }
+        throw failure ?: IOException("Comix image has no usable host")
     }
 
     /** OCR for one image, split into vertical tiles so very long webtoon strips stay within memory limits. */

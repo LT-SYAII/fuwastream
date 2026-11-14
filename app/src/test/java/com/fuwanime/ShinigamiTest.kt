@@ -81,6 +81,8 @@ class ShinigamiTest {
     @Test fun dohCoversMangaHosts() {
         assertTrue(needsDoh("comix.ws"))
         assertTrue(needsDoh("cdn.comix.ws"))
+        assertTrue(needsDoh("447.visualstorystudio.site"))
+        assertTrue(needsDoh("rxn.kkplayer.wtf"))
         assertTrue(needsDoh("api.shngm.io"))
         assertTrue(needsDoh("assets.shngm.id"))
         assertTrue(needsDoh("komiku.org"))

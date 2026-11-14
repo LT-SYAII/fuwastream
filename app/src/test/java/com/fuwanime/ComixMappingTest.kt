@@ -4,6 +4,7 @@ import com.fuwanime.data.manga.MangaStatus
 import com.fuwanime.data.manga.comixChapter
 import com.fuwanime.data.manga.comixManga
 import com.fuwanime.data.manga.comixPageUrls
+import com.fuwanime.data.manga.mangaPageCandidates
 import com.fuwanime.data.manga.sourceRank
 import com.fuwanime.data.manga.translationChunks
 import org.junit.Assert.assertEquals
@@ -38,7 +39,16 @@ class ComixMappingTest {
             ),
             "x0ynk",
         )
-        val pages = comixPageUrls(mapOf("pages" to listOf(mapOf("url" to "https://cdn.example/1.webp"))))
+        val pages = comixPageUrls(
+            mapOf(
+                "pages" to listOf(
+                    mapOf(
+                        "url" to "https://cdn.example/1.webp",
+                        "urls" to listOf("https://cdn.example/1.webp", "https://backup.example/1.webp"),
+                    ),
+                ),
+            ),
+        )
 
         assertEquals("cx:x0ynk", manga.id)
         assertEquals("Villains Are Destined to Die", manga.title)
@@ -49,7 +59,10 @@ class ComixMappingTest {
         assertEquals("cx:x0ynk:11723370", chapter.id)
         assertEquals("214", chapter.number)
         assertEquals("TappyToon", chapter.group)
-        assertEquals(listOf("https://cdn.example/1.webp"), pages)
+        assertEquals(
+            listOf("https://cdn.example/1.webp", "https://backup.example/1.webp"),
+            mangaPageCandidates(pages.single()),
+        )
     }
 
     @Test fun mapsCurrentBrowseItem() {

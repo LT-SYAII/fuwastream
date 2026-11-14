@@ -121,6 +121,7 @@ import com.fuwanime.data.manga.MangaRepository
 import com.fuwanime.data.manga.MangaTranslationException
 import com.fuwanime.data.manga.MangaTranslationFailure
 import com.fuwanime.data.manga.MangaTranslator
+import com.fuwanime.data.manga.mangaPageCandidates
 import com.fuwanime.data.manga.nextChapter
 import com.fuwanime.data.manga.previousChapter
 import com.fuwanime.ui.components.ErrorState
@@ -664,6 +665,9 @@ private fun Page(
     onRetryTranslation: () -> Unit,
     onFailed: () -> Unit,
 ) {
+    val candidates = remember(url) { mangaPageCandidates(url).ifEmpty { listOf(url) } }
+    var candidateIndex by remember(url, generation) { mutableIntStateOf(0) }
+    val requestIndex = candidateIndex
     var status by remember(url, generation) { mutableStateOf<AsyncImagePainter.State?>(null) }
     val description = stringResource(R.string.manga_reader_page_cd, index + 1)
     val result = translation?.translation
@@ -673,11 +677,18 @@ private fun Page(
             contentAlignment = Alignment.Center,
         ) {
             // A new generation recreates the request, so "Muat ulang" retries even when the refetched URL is identical.
-            key(generation) { AsyncImage(
-                model = url,
+            key(generation, requestIndex) { AsyncImage(
+                model = candidates[requestIndex],
                 contentDescription = description,
                 contentScale = ContentScale.FillWidth,
-                onState = { status = it },
+                onState = { next ->
+                    if (next is AsyncImagePainter.State.Error && requestIndex < candidates.lastIndex) {
+                        status = null
+                        candidateIndex = requestIndex + 1
+                    } else {
+                        status = next
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
             ) }
             if (status is AsyncImagePainter.State.Success && translationEnabled && result != null && result.regions.isNotEmpty()) {
@@ -712,15 +723,25 @@ private fun ReaderPage(
     onFailed: () -> Unit,
     bottomPadding: Dp,
 ) {
+    val candidates = remember(url) { mangaPageCandidates(url).ifEmpty { listOf(url) } }
+    var candidateIndex by remember(url, generation) { mutableIntStateOf(0) }
+    val requestIndex = candidateIndex
     var status by remember(url, generation) { mutableStateOf<AsyncImagePainter.State?>(null) }
     val result = translation?.translation
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        key(generation) {
+        key(generation, requestIndex) {
             AsyncImage(
-                model = url,
+                model = candidates[requestIndex],
                 contentDescription = stringResource(R.string.manga_reader_page_cd, index + 1),
                 contentScale = ContentScale.Fit,
-                onState = { status = it },
+                onState = { next ->
+                    if (next is AsyncImagePainter.State.Error && requestIndex < candidates.lastIndex) {
+                        status = null
+                        candidateIndex = requestIndex + 1
+                    } else {
+                        status = next
+                    }
+                },
                 modifier = Modifier.fillMaxSize(),
             )
         }

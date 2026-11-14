@@ -151,3 +151,12 @@ fun nextChapter(list: List<MangaChapter>, currentId: String): MangaChapter? =
 
 fun previousChapter(list: List<MangaChapter>, currentId: String): MangaChapter? =
     list.indexOfFirst { it.id == currentId }.takeIf { it > 0 }?.let { list[it - 1] }
+
+private const val PAGE_CANDIDATE_SEPARATOR = '\u001F'
+
+/** Network alternatives for one logical page. Most sources have one; Comix rotates several equivalent hosts. */
+fun mangaPageCandidates(value: String): List<String> =
+    value.split(PAGE_CANDIDATE_SEPARATOR).filter { it.isNotBlank() }.distinct()
+
+internal fun packMangaPageCandidates(values: List<String>): String =
+    values.filter { it.isNotBlank() }.distinct().joinToString(PAGE_CANDIDATE_SEPARATOR.toString())

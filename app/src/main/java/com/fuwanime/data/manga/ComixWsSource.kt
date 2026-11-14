@@ -115,8 +115,13 @@ internal fun comixChapter(data: Any?, hid: String): MangaChapter {
 internal fun comixPageUrls(data: Any?): List<String> {
     val m = data.map()
     return m["pages"].list().ifEmpty { m["sN"].list() }.ifEmpty { m["iE"].list() }.ifEmpty { m["iT"].list() }
-        .mapNotNull { it.map().firstString("url", "FM", "Gh", "H$") }
-        .filter { it.startsWith("https://") }
+        .mapNotNull { page ->
+            val item = page.map()
+            val primary = item.firstString("url", "FM", "Gh", "H$") ?: return@mapNotNull null
+            val alternatives = item["urls"].list().mapNotNull { it as? String }
+            packMangaPageCandidates(listOf(primary) + alternatives)
+        }
+        .filter { mangaPageCandidates(it).firstOrNull()?.startsWith("https://") == true }
 }
 
 private fun parseComixRelativeTime(value: String?): Long {
@@ -583,8 +588,32 @@ private class ComixWebRuntime(private val app: Application, private val http: Ok
                   const pages = arrays.find(a => a.length && a.every(isObject) &&
                     a.some(o => Object.values(o).some(v => typeof v === 'string' && v.startsWith('https://')))) ?? [];
                   return {
-                    pages: pages.map(o => ({ url: Object.values(o).find(v => typeof v === 'string' && v.startsWith('https://')) }))
-                      .filter(p => p.url),
+                    // Comix's reader tries several rotating image hosts. Preserve the same candidates so one
+                    // ISP-blocked/dead host cannot blank the entire chapter in the Android reader.
+                    pages: pages.map((o, pageIndex) => {
+                      const values = Object.values(o);
+                      const url = values.find(v => typeof v === 'string' && v.startsWith('https://'));
+                      if (!url) return null;
+                      const parsed = /^(https?:\/\/)([^/?#]+)(.*)$/.exec(url);
+                      if (!parsed) return { url, urls: [url] };
+                      const hostParts = parsed[2].split('.');
+                      const subdomain = hostParts.shift();
+                      const root = hostParts.join('.');
+                      const domains = values.find(v => Array.isArray(v) && v.length &&
+                        v.every(domain => typeof domain === 'string' && domain.includes('.'))) ?? [];
+                      const strings = values.filter(v => typeof v === 'string' && !v.startsWith('http'));
+                      const fallbackRoot = strings.find(v => v.includes('.'));
+                      const fallbackSubdomain = strings.find(v => !v.includes('.') && !v.includes('/'));
+                      const roots = [root, domains.length ? domains[pageIndex % domains.length] : null, fallbackRoot];
+                      const subdomains = [subdomain, fallbackSubdomain].filter(Boolean);
+                      const urls = [];
+                      for (const sub of subdomains) for (const domain of roots) {
+                        if (!domain) continue;
+                        const candidate = parsed[1] + sub + '.' + domain + parsed[3];
+                        if (!urls.includes(candidate)) urls.push(candidate);
+                      }
+                      return { url, urls };
+                    }).filter(Boolean),
                   };
                 };
 
