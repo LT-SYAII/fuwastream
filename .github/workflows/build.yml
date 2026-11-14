@@ -192,8 +192,9 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           # The test translates a whole real Comix chapter with the bundled OCR model and ML Kit translation.
+          # Keep the app installed so the translated-page renders survive for the adb pull below.
           script: |
-            gradle :app:connectedDebugAndroidTest -PabiSplits=false --stacktrace
+            gradle :app:connectedDebugAndroidTest -PabiSplits=false -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true --stacktrace
             code=$?
             adb pull /sdcard/Android/data/com.fuwanime.app.debug/files/translation-evidence translation-evidence || true
             exit $code

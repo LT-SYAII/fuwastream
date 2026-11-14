@@ -10,7 +10,9 @@ import android.text.StaticLayout
 import android.text.TextPaint
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.fuwanime.data.manga.MangaRelease
+import com.fuwanime.data.manga.Manga
+import com.fuwanime.data.manga.MangaChapter
+import com.fuwanime.data.manga.MangaOrder
 import com.fuwanime.data.manga.MangaRepository
 import com.fuwanime.data.manga.PageTranslation
 import java.io.File
@@ -37,12 +39,14 @@ class MangaTranslationInstrumentedTest {
         val font = Typeface.createFromAsset(app.assets, TRANSLATION_FONT)
         println("translation font loaded: $font")
 
-        val releases = repository.latestOngoingChapters(limit = 8)
-        assertTrue("Comix returned no recent chapters", releases.isNotEmpty())
+        // Popular action titles are all-ages in practice and give a stable, text-heavy chapter to translate.
+        val popular = repository.browse(MangaOrder.POPULAR, tagIds = listOf(ACTION_GENRE))
+        val candidates = popular.items.filter(::isAllAges)
+        assertTrue("No all-ages popular action titles from Comix", candidates.isNotEmpty())
 
-        val (release, pages) = firstReadableChapter(repository, releases)
-        assertTrue("No readable pages in ${release.title} ${release.chapterId}", pages.isNotEmpty())
-        println("chapter: ${release.title} ${release.chapterId} (${pages.size} pages)")
+        val (manga, chapter, pages) = firstReadableChapter(repository, candidates)
+        assertTrue("No readable pages in ${manga.title} ${chapter.id}", pages.isNotEmpty())
+        println("chapter: ${manga.title} ${chapter.id} (${pages.size} pages)")
 
         val translations = ArrayList<PageTranslation>(pages.size)
         pages.forEachIndexed { index, url ->
@@ -51,11 +55,7 @@ class MangaTranslationInstrumentedTest {
                 println("downloading the translation model (page ${index + 1})")
             }
             val elapsed = System.currentTimeMillis() - started
-            println(
-                "page ${index + 1}/${pages.size}: ${translation.regions.size} regions, " +
-                    "${translation.text.length} chars in ${elapsed}ms: " +
-                    translation.text.take(180).replace('\n', ' '),
-            )
+            println("page ${index + 1}/${pages.size}: ${translation.regions.size} regions, ${translation.text.length} chars in ${elapsed}ms")
             translations += translation
         }
 
@@ -80,7 +80,7 @@ class MangaTranslationInstrumentedTest {
         assertTrue("Translated text is suspiciously short ($totalChars chars)", totalChars >= pages.size * 20)
         val joined = translations.joinToString(" ") { it.text }.lowercase()
         assertTrue(
-            "Translation does not look Indonesian: ${joined.take(400)}",
+            "Translation does not look Indonesian ($totalChars chars)",
             INDONESIAN_WORDS.any { Regex("\\b$it\\b").containsMatchIn(joined) },
         )
         translator.close()
@@ -125,25 +125,42 @@ class MangaTranslationInstrumentedTest {
         }
     }
 
-    /** The newest release can be locked or empty, so try a few until one exposes page images. */
+    /** Mature content is a user setting; the pipeline test must stay on all-ages titles. */
+    private fun isAllAges(manga: Manga): Boolean {
+        val tags = manga.tags.map { it.lowercase() }
+        val adult = tags.any { tag -> ADULT_TAGS.any { tag.contains(it) } } ||
+            EXPLICIT_WORDS.any { it in manga.title.lowercase() || it in manga.description.lowercase() }
+        if (adult) println("skipping adult title: ${manga.title} (tags: ${manga.tags})")
+        return !adult
+    }
+
+    /** Popular titles can be huge; check the first and latest chapters, which are usually free. */
     private suspend fun firstReadableChapter(
         repository: MangaRepository,
-        releases: List<MangaRelease>,
-    ): Pair<MangaRelease, List<String>> {
-        for (release in releases) {
-            val pages = runCatching { repository.pages(release.chapterId) }.getOrElse {
-                println("pages failed for ${release.title} ${release.chapterId}: ${it.message}")
+        candidates: List<Manga>,
+    ): Triple<Manga, MangaChapter, List<String>> {
+        for (manga in candidates) {
+            val chapters = runCatching { repository.chapters(manga.id) }.getOrElse {
+                println("chapters failed for ${manga.title}: ${it.message}")
                 emptyList()
             }
-            // A locked chapter usually resolves to a single placeholder image; skip it for a real chapter.
-            if (pages.size >= 3) return release to pages
-            println("no readable pages for ${release.title} ${release.chapterId} (${pages.size} pages)")
+            val readable = chapters.filter { it.externalUrl == null && it.pages > 0 }
+            val sample = (readable.take(3) + readable.takeLast(3)).distinctBy { it.id }
+            for (chapter in sample) {
+                val pages = runCatching { repository.pages(chapter.id) }.getOrElse {
+                    println("pages failed for ${manga.title} ${chapter.id}: ${it.message}")
+                    emptyList()
+                }
+                if (pages.size >= 3) return Triple(manga, chapter, pages)
+                println("no readable pages for ${manga.title} ${chapter.id} (${pages.size} pages)")
+            }
         }
-        throw AssertionError("None of ${releases.size} recent Comix chapters exposed page images")
+        throw AssertionError("None of ${candidates.size} popular action titles exposed page images")
     }
 
     private companion object {
         const val TRANSLATION_FONT = "translation_font.ttf"
+        const val ACTION_GENRE = "6"
         const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
 
@@ -154,5 +171,9 @@ class MangaTranslationInstrumentedTest {
             "dari", "ke", "saya", "anda", "tapi", "karena", "jika", "saat", "harus", "sedang",
             "telah", "belum", "bukan", "hanya", "juga", "lagi",
         )
+
+        /** Mature content is a user setting; the pipeline test must stay on all-ages titles. */
+        val ADULT_TAGS = listOf("adult", "smut", "ecchi", "hentai", "mature", "erotica", "pornographic")
+        val EXPLICIT_WORDS = listOf("hentai", "erotica", "smut", "nsfw", "porn")
     }
 }
