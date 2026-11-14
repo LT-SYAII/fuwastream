@@ -211,20 +211,47 @@ class MangaTranslator(
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         val width = bounds.outWidth
         val height = bounds.outHeight
-        if (width <= 0 || height <= 0) throw IOException("Unsupported Comix image")
+        if (width <= 0 || height <= 0) throw IOException("Unsupported image format")
 
         val blocks = ArrayList<RecognizedBlock>()
         if (height <= TILE_HEIGHT) {
-            val (bitmap, sample) = decode(bytes, width, height) ?: throw IOException("Unsupported Comix image")
+            val (bitmap, sample) = decode(bytes, width, height) ?: throw IOException("Unsupported image format")
             try {
                 addBlocks(blocks, recognizeBitmap(bitmap, sample, 0, width, height, onWaitingForModel))
             } finally {
                 bitmap.recycle()
             }
         } else {
-            val decoder = BitmapRegionDecoder.newInstance(bytes, 0, bytes.size, false)
-                ?: throw IOException("Unsupported Comix image")
-            // Keep tiles near MAX_WIDTH as well; the coordinates are scaled back to the original page.
+            // Try BitmapRegionDecoder first; fall back to BitmapFactory for formats it handles better.
+            var decoder: BitmapRegionDecoder? = BitmapRegionDecoder.newInstance(bytes, 0, bytes.size, false)
+            if (decoder == null) {
+                // BitmapRegionDecoder failed (some extended WebP variants). Decode the full image and tile it in memory.
+                val full = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    ?: throw IOException("Unsupported image format")
+                try {
+                    val sample = ((width + MAX_WIDTH - 1) / MAX_WIDTH).coerceAtLeast(1)
+                    var top = 0
+                    while (top < height) {
+                        val bottom = (top + TILE_HEIGHT).coerceAtMost(height)
+                        val tileTop = top / sample
+                        val tileBottom = (bottom / sample).coerceAtMost(full.height)
+                        val tile = Bitmap.createBitmap(full, 0, tileTop, full.width / sample, tileBottom - tileTop)
+                        if (tile != null) {
+                            try {
+                                addBlocks(blocks, recognizeBitmap(tile, sample, top, width, height, onWaitingForModel))
+                            } finally {
+                                tile.recycle()
+                            }
+                        }
+                        if (bottom >= height) break
+                        top = bottom - TILE_OVERLAP
+                    }
+                } finally {
+                    full.recycle()
+                }
+                return@withContext RecognizedPage(width, height, blocks)
+            }
+            // Standard path: tile with BitmapRegionDecoder.
             val sample = ((width + MAX_WIDTH - 1) / MAX_WIDTH).coerceAtLeast(1)
             try {
                 var top = 0
@@ -413,6 +440,7 @@ class MangaTranslator(
         const val TRANSLATION_MODEL_RETRY_MS = 2_000L
         const val TAG = "MangaTranslator"
         val WHITESPACE = Regex("\\s+")
+        const val TRANSLATION_FONT = "translation_font.ttf"
     }
 }
 

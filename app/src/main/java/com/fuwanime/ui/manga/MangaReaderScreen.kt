@@ -96,7 +96,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.core.content.res.ResourcesCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -773,7 +772,7 @@ private fun TranslationOverlay(translation: PageTranslation, modifier: Modifier 
     if (translation.regions.isEmpty() || translation.width <= 0 || translation.height <= 0) return
     val context = LocalContext.current
     val typeface = remember(context) {
-        runCatching { ResourcesCompat.getFont(context, R.font.comic_neue_bold) }.getOrNull()
+        runCatching { Typeface.createFromAsset(context.assets, "translation_font.ttf") }.getOrNull()
             ?: Typeface.DEFAULT_BOLD
     }
     Canvas(modifier) {
