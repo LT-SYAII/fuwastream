@@ -34,6 +34,8 @@ android {
     // values when not set (deterministic, not epoch minutes).
     versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 13
     versionName = System.getenv("VERSION_NAME") ?: "2.1.10"
+    // Instrumented tests exercise the real Comix OCR/translation pipeline on an emulator.
+    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     // The in-app update checker looks at the repo this APK was built from (a fork checks its own releases).
     buildConfigField("String", "UPDATE_REPO", "\"${System.getenv("GITHUB_REPOSITORY") ?: "LT-SYAII/fuwastream"}\"")
   }
@@ -130,5 +132,8 @@ dependencies {
   testImplementation(libs.okhttp.mockwebserver)
   testImplementation(libs.robolectric)
   testImplementation(libs.androidx.test.core)
+  androidTestImplementation(libs.androidx.junit)
+  androidTestImplementation(libs.androidx.test.core)
+  androidTestImplementation(libs.androidx.test.runner)
   debugImplementation(libs.androidx.compose.ui.tooling)
 }

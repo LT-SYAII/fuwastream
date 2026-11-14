@@ -15,6 +15,10 @@ on:
         description: QA run with animations on, gesture navigation and screen recordings
         type: boolean
         default: false
+      translate:
+        description: Translate one real Comix chapter on the emulator (bundled OCR + ML Kit EN→ID)
+        type: boolean
+        default: false
       profile:
         description: Generate the baseline profile on an emulator and upload it as an artifact
         type: boolean
@@ -156,6 +160,52 @@ jobs:
         with:
           name: smoke-screenshots
           path: screenshots/
+
+  translate:
+    if: github.event_name == 'workflow_dispatch' && inputs.translate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          # The test translates a whole real Comix chapter with the bundled OCR model and ML Kit translation.
+          script: |
+            gradle :app:connectedDebugAndroidTest -PabiSplits=false --stacktrace
+            code=$?
+            adb pull /sdcard/Android/data/com.fuwanime.app.debug/files/translation-evidence translation-evidence || true
+            exit $code
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: translation-test-reports
+          path: |
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
+            translation-evidence/
 
   profile:
     if: github.event_name == 'workflow_dispatch' && inputs.profile
