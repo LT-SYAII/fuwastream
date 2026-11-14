@@ -70,8 +70,10 @@ class MangaTranslationInstrumentedTest {
         // Save the first three translated pages with the real overlay font; CI pulls this folder as evidence.
         // Done before the assertions so a failing run still produces images to inspect.
         var saved = 0
+        var attempted = 0
         translations.forEachIndexed { index, translation ->
-            if (saved < 3 && translation.regions.isNotEmpty()) {
+            if (saved < 3 && attempted < 8 && translation.regions.isNotEmpty()) {
+                attempted++
                 val name = "page-%02d.png".format(index + 1)
                 runCatching { writeEvidence(app, pages[index], translation) }
                     .onSuccess { bytes -> if (publishEvidence(app, name, bytes)) saved++ }
@@ -95,8 +97,21 @@ class MangaTranslationInstrumentedTest {
     /** Draws the translated blocks with [TRANSLATION_FONT] so the artifact proves both OCR and the overlay font. */
     private fun writeEvidence(app: FuwaApp, url: String, translation: PageTranslation): ByteArray {
         val bytes = downloadPage(app, url)
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            ?: throw IOException("Unsupported image format (${bytes.size} bytes)")
+        val decoded = BitmapFactory.decodeByteArray(
+            bytes,
+            0,
+            bytes.size,
+            BitmapFactory.Options().apply { inMutable = true },
+        ) ?: throw IOException("Unsupported image format (${bytes.size} bytes)")
+        // BitmapFactory can ignore inMutable; Canvas requires a mutable bitmap.
+        val bitmap = if (decoded.isMutable) {
+            decoded
+        } else {
+            val copy = decoded.copy(Bitmap.Config.ARGB_8888, true)
+                ?: throw IOException("Could not make bitmap mutable")
+            decoded.recycle()
+            copy
+        }
         try {
             val canvas = Canvas(bitmap)
             val typeface = Typeface.createFromAsset(app.assets, TRANSLATION_FONT)
