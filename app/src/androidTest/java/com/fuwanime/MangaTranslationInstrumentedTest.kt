@@ -19,7 +19,9 @@ import com.fuwanime.data.manga.MangaChapter
 import com.fuwanime.data.manga.MangaOrder
 import com.fuwanime.data.manga.MangaRepository
 import com.fuwanime.data.manga.PageTranslation
+import com.fuwanime.data.manga.mangaPageCandidates
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import kotlinx.coroutines.runBlocking
 import okhttp3.Request
 import org.junit.Assert.assertTrue
@@ -72,7 +74,7 @@ class MangaTranslationInstrumentedTest {
             if (saved < 3 && translation.regions.isNotEmpty()) {
                 val name = "page-%02d.png".format(index + 1)
                 runCatching { writeEvidence(app, pages[index], translation) }
-                    .onSuccess { bytes -> if (bytes != null && publishEvidence(app, name, bytes)) saved++ }
+                    .onSuccess { bytes -> if (publishEvidence(app, name, bytes)) saved++ }
                     .onFailure { println("could not save evidence for page ${index + 1}: ${it.message}") }
             }
         }
@@ -91,10 +93,10 @@ class MangaTranslationInstrumentedTest {
     }
 
     /** Draws the translated blocks with [TRANSLATION_FONT] so the artifact proves both OCR and the overlay font. */
-    private fun writeEvidence(app: FuwaApp, url: String, translation: PageTranslation): ByteArray? {
-        val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()
-        val bytes = app.container.httpClient.newCall(request).execute().use { it.body?.bytes() } ?: return null
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+    private fun writeEvidence(app: FuwaApp, url: String, translation: PageTranslation): ByteArray {
+        val bytes = downloadPage(app, url)
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: throw IOException("Unsupported image format (${bytes.size} bytes)")
         try {
             val canvas = Canvas(bitmap)
             val typeface = Typeface.createFromAsset(app.assets, TRANSLATION_FONT)
@@ -129,6 +131,23 @@ class MangaTranslationInstrumentedTest {
         }
     }
 
+    /** Mirrors MangaTranslator: the Comix CDN needs its User-Agent, no Referer, and may move hosts. */
+    private fun downloadPage(app: FuwaApp, url: String): ByteArray {
+        var failure: IOException? = null
+        for (candidate in mangaPageCandidates(url).ifEmpty { listOf(url) }) {
+            try {
+                val request = Request.Builder().url(candidate).header("User-Agent", USER_AGENT).build()
+                app.container.videoHttpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) throw IOException("HTTP ${response.code} for $candidate")
+                    return response.body?.bytes() ?: throw IOException("Empty body for $candidate")
+                }
+            } catch (e: IOException) {
+                failure = e
+            }
+        }
+        throw IOException("Could not download page $url", failure)
+    }
+
     /** Inserts one render into shared Downloads through MediaStore, so it survives the post-test uninstall. */
     private fun publishEvidence(app: FuwaApp, name: String, bytes: ByteArray): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
@@ -139,9 +158,19 @@ class MangaTranslationInstrumentedTest {
             put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/translation-evidence")
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
-        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return false
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        if (uri == null) {
+            println("could not publish evidence: MediaStore insert returned null")
+            return false
+        }
         return try {
-            resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return false
+            val output = resolver.openOutputStream(uri)
+            if (output == null) {
+                println("could not publish evidence: no output stream for $uri")
+                resolver.delete(uri, null, null)
+                return false
+            }
+            output.use { it.write(bytes) }
             values.clear()
             values.put(MediaStore.MediaColumns.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
