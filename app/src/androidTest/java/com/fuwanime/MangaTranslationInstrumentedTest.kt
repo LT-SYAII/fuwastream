@@ -1,24 +1,25 @@
 package com.fuwanime
 
+import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
-import android.os.ParcelFileDescriptor
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import com.fuwanime.data.manga.Manga
 import com.fuwanime.data.manga.MangaChapter
 import com.fuwanime.data.manga.MangaOrder
 import com.fuwanime.data.manga.MangaRepository
 import com.fuwanime.data.manga.PageTranslation
-import java.io.File
-import java.io.FileOutputStream
+import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.runBlocking
 import okhttp3.Request
 import org.junit.Assert.assertTrue
@@ -69,19 +70,14 @@ class MangaTranslationInstrumentedTest {
         var saved = 0
         translations.forEachIndexed { index, translation ->
             if (saved < 3 && translation.regions.isNotEmpty()) {
-                runCatching { writeEvidence(app, pages[index], translation, index + 1) }
-                    .onSuccess { saved++ }
+                val name = "page-%02d.png".format(index + 1)
+                runCatching { writeEvidence(app, pages[index], translation) }
+                    .onSuccess { bytes -> if (bytes != null && publishEvidence(app, name, bytes)) saved++ }
                     .onFailure { println("could not save evidence for page ${index + 1}: ${it.message}") }
             }
         }
         println("translated $withText/${pages.size} pages, $withRegions with regions, $totalChars chars total")
         println("saved $saved translated page images")
-        if (saved > 0) {
-            // Gradle uninstalls the app after the test, which also deletes its external files dir. Copy the
-            // renders to shared storage from inside the test so the CI adb pull still finds them.
-            runCatching { publishEvidence(app) }
-                .onFailure { println("could not publish evidence: ${it.message}") }
-        }
         assertTrue("OCR produced no text on any page", withRegions > 0)
         // Webtoon chapters contain genuinely textless art pages; require text on a meaningful share instead.
         assertTrue("OCR text missing on most pages ($withText/${pages.size})", withText >= maxOf(1, pages.size / 4))
@@ -95,10 +91,10 @@ class MangaTranslationInstrumentedTest {
     }
 
     /** Draws the translated blocks with [TRANSLATION_FONT] so the artifact proves both OCR and the overlay font. */
-    private fun writeEvidence(app: FuwaApp, url: String, translation: PageTranslation, page: Int) {
+    private fun writeEvidence(app: FuwaApp, url: String, translation: PageTranslation): ByteArray? {
         val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()
-        val bytes = app.container.httpClient.newCall(request).execute().use { it.body?.bytes() } ?: return
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return
+        val bytes = app.container.httpClient.newCall(request).execute().use { it.body?.bytes() } ?: return null
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
         try {
             val canvas = Canvas(bitmap)
             val typeface = Typeface.createFromAsset(app.assets, TRANSLATION_FONT)
@@ -124,24 +120,38 @@ class MangaTranslationInstrumentedTest {
                 layout.draw(canvas)
                 canvas.restore()
             }
-            val dir = File(app.getExternalFilesDir(null), "translation-evidence").apply { mkdirs() }
-            FileOutputStream(File(dir, "page-%02d.png".format(page))).use {
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+            return ByteArrayOutputStream().use { out ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                out.toByteArray()
             }
         } finally {
             bitmap.recycle()
         }
     }
 
-    /** Copies the app-private renders to shared storage as the shell user, which survives the test uninstall. */
-    private fun publishEvidence(app: FuwaApp) {
-        val source = File(app.getExternalFilesDir(null), "translation-evidence").absolutePath
-        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-        val command = "rm -rf $EVIDENCE_DIR && cp -r $source $EVIDENCE_DIR"
-        val output = automation.executeShellCommand(command).use { pfd ->
-            ParcelFileDescriptor.AutoCloseInputStream(pfd).readBytes().decodeToString()
+    /** Inserts one render into shared Downloads through MediaStore, so it survives the post-test uninstall. */
+    private fun publishEvidence(app: FuwaApp, name: String, bytes: ByteArray): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        val resolver = app.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/translation-evidence")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
-        println("published evidence to $EVIDENCE_DIR $output")
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return false
+        return try {
+            resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return false
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            println("published evidence to $uri")
+            true
+        } catch (e: Exception) {
+            println("could not publish evidence: ${e.message}")
+            resolver.delete(uri, null, null)
+            false
+        }
     }
 
     /** Mature content is a user setting; the pipeline test must stay on all-ages titles. */
@@ -180,7 +190,6 @@ class MangaTranslationInstrumentedTest {
     private companion object {
         const val TRANSLATION_FONT = "translation_font.ttf"
         const val ACTION_GENRE = "6"
-        const val EVIDENCE_DIR = "/sdcard/Download/translation-evidence"
         const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
 
