@@ -139,7 +139,10 @@ adb shell input swipe 540 1500 540 800 400; shot 22b-manga-shelves 4; alive
 relaunch; tap "Manga"; sleep 12; tap_below "Populer Indonesia"; shot 23-manga-detail 12; alive
 adb shell input swipe 540 1600 540 700 400; shot 23b-manga-chapters 3; alive
 tap "Mulai baca" && shot 24-manga-reader 15; alive
-adb shell input swipe 540 1700 540 300 300; shot 24b-manga-reader-scroll 5; alive
+# Test manga translation: enable translate, scroll to trigger OCR on several pages, then check for errors.
+tap "Terjemahkan" || tap "Translate" || true; shot 24b-manga-translate-on 5; alive
+adb shell input swipe 540 1700 540 300 300; shot 24c-manga-reader-scroll 5; alive
+adb logcat -d | grep -iE 'MangaTranslator|MangaTranslation|OCR|ocr' | head -20
 relaunch; tap "Manga"; sleep 10; tap "Cari manga" && adb shell input text "berserk" && shot 25-manga-search 12; alive
 relaunch; tap "Koleksi"; sleep 3; tap "Statistik*" && shot 26-stats 6; alive
 
