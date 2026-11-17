@@ -127,5 +127,9 @@
     <string name="manga_reader_auto_scroll_desc">In Webtoon mode, pages scroll down automatically and continue to the next chapter.</string>
     <string name="manga_reader_continue_hint">Scroll again or tap to continue to the next chapter</string>
     <string name="manga_reader_source_webtoon">WEBTOON</string>
+    <string name="manga_reader_source_kakamanga">KakaManga</string>
+    <string name="manga_reader_source_mangapark">MangaPark</string>
     <string name="manga_credit_webtoon">Source: WEBTOON</string>
+    <string name="manga_credit_kakamanga">Source: KakaManga</string>
+    <string name="manga_credit_mangapark">Source: MangaPark</string>
 </resources>

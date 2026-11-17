@@ -3,6 +3,7 @@ package com.fuwanime.data.manga
 import com.fuwanime.R
 import com.fuwanime.util.UiText
 import com.fuwanime.util.UiTextException
+import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -26,6 +27,10 @@ class MangaRepository(
     private val comix: ComixWsSource? = null,
     /** Fourth source (official, originals + canvas in id/en); ids starting with "wt:". */
     private val webtoon: WebtoonSource? = null,
+    /** English fallback source (MangaKakalot/KakaManga network); ids start with "kk:". */
+    private val kakaManga: KakaMangaSource? = null,
+    /** English fallback source (MangaPark); ids start with "mp:". */
+    private val mangaPark: MangaParkSource? = null,
     /** "Konten dewasa" setting: also show Comix titles rated erotica; never pornographic. */
     private val mature: suspend () -> Boolean = { false },
 ) {
@@ -107,22 +112,44 @@ class MangaRepository(
             if (isKomikuId(manga.id)) null else async { look { komiku?.find(names) } },
             if (isComixId(manga.id)) null else async { look { comix?.find(names) } },
             if (isWebtoonId(manga.id)) null else async { look { webtoon?.find(names) } },
+            if (isKakaMangaId(manga.id)) null else async { look { kakaManga?.find(names) } },
+            if (isMangaParkId(manga.id)) null else async { look { mangaPark?.find(names) } },
         ).awaitAll().filterNotNull()
         (listOf(manga) + others).also { sourceCache[manga.id] = it }
     }
 
     /** Every chapter of [manga] on every source, all languages; [mergeChapters] picks per language. Fails only if every source fails. */
     suspend fun mergedChapters(manga: Manga): List<MangaChapter> = mergedCache[manga.id] ?: coroutineScope {
-        // The opened title may take its time; another source that stalls is dropped instead of holding the list back.
-        val results = sources(manga).mapIndexed { i, m ->
+        val found = sources(manga)
+        val primaryComix = isComixId(manga.id)
+        val results = found.mapIndexed { i, m ->
             async {
                 runCatching {
-                    if (i == 0) chapters(m.id) else withTimeoutOrNull(OTHER_CHAPTERS_TIMEOUT_MS) { chapters(m.id) }.orEmpty()
+                    if (i == 0) {
+                        // Bound Comix too: if it hangs/fails, other/alternative sources can still provide chapters.
+                        if (primaryComix) (withTimeoutOrNull(COMIX_SEARCH_TIMEOUT_MS) { chapters(m.id) }
+                            ?: throw IOException("Comix chapters unavailable"))
+                        else chapters(m.id)
+                    } else withTimeoutOrNull(OTHER_CHAPTERS_TIMEOUT_MS) { chapters(m.id) }.orEmpty()
                 }
             }
         }.awaitAll()
+        val merged = results.flatMap { it.getOrDefault(emptyList()) }
+        if (merged.isNotEmpty()) return@coroutineScope merged.also { mergedCache[manga.id] = it }
+        // Primary (often Comix) yielded nothing usable: actively discover alternative sources by title as fallback.
+        if (primaryComix || results.firstOrNull()?.isFailure == true) {
+            val names = (listOf(manga.title) + manga.altTitles).filter { it.isNotBlank() && it.count(Char::isLetterOrDigit) >= 5 }.distinct()
+            val knownIds = found.mapTo(HashSet()) { it.id }
+            val alts = findEnglishAlternatives(names).filter { it.id !in knownIds }
+            if (alts.isNotEmpty()) {
+                val extra = alts.map { m ->
+                    async { runCatching { withTimeoutOrNull(OTHER_CHAPTERS_TIMEOUT_MS) { chapters(m.id) }.orEmpty() } }
+                }.awaitAll().flatMap { it.getOrDefault(emptyList()) }
+                if (extra.isNotEmpty()) return@coroutineScope extra.also { mergedCache[manga.id] = it }
+            }
+        }
         if (results.all { it.isFailure }) throw results.first().exceptionOrNull()!!
-        results.flatMap { it.getOrDefault(emptyList()) }.also { mergedCache[manga.id] = it }
+        merged.also { mergedCache[manga.id] = it }
     }
 
     /** Forget the cached sources and chapters of one title, so a retry looks again. */
@@ -131,10 +158,27 @@ class MangaRepository(
         mergedCache.remove(mangaId)
     }
 
+    /** Alternative English sources for a title (used as fallback when Comix chapters are unavailable). */
+    private suspend fun findEnglishAlternatives(names: List<String>): List<Manga> = coroutineScope {
+        val lookups = buildList<suspend () -> Manga?> {
+            if (kakaManga != null) add { kakaManga.find(names) }
+            if (mangaPark != null) add { mangaPark.find(names) }
+            // Also try existing sources not already found (safety net)
+            if (webtoon != null) add { webtoon.find(names) }
+            if (shinigami != null) add { shinigami.find(names) }
+            if (komiku != null) add { komiku.find(names) }
+        }
+        if (lookups.isEmpty()) return@coroutineScope emptyList()
+        lookups.map { fn -> async { runCatching { withTimeoutOrNull(LOOKUP_TIMEOUT_MS) { fn() } }.getOrNull() } }
+            .awaitAll().filterNotNull().distinctBy { it.id }
+    }
+
     suspend fun detail(id: String): Manga {
         if (isShinigamiId(id)) return shinigami?.detail(id) ?: throw notFound()
         if (isKomikuId(id)) return komiku?.detail(id) ?: throw notFound()
         if (isWebtoonId(id)) return webtoon?.detail(id) ?: throw notFound()
+        if (isKakaMangaId(id)) return kakaManga?.detail(id) ?: throw notFound()
+        if (isMangaParkId(id)) return mangaPark?.detail(id) ?: throw notFound()
         return comix?.detail(comixId(id)) ?: throw notFound()
     }
 
@@ -142,6 +186,8 @@ class MangaRepository(
         if (isShinigamiId(id)) return shinigami?.chapters(id).orEmpty()
         if (isKomikuId(id)) return komiku?.chapters(id).orEmpty()
         if (isWebtoonId(id)) return webtoon?.chapters(id).orEmpty()
+        if (isKakaMangaId(id)) return kakaManga?.chapters(id).orEmpty()
+        if (isMangaParkId(id)) return mangaPark?.chapters(id).orEmpty()
         return comix?.chapters(comixId(id)).orEmpty()
     }
 
@@ -159,6 +205,8 @@ class MangaRepository(
         if (isShinigamiId(chapterId)) return shinigami?.pages(chapterId).orEmpty()
         if (isKomikuId(chapterId)) return komiku?.pages(chapterId).orEmpty()
         if (isWebtoonId(chapterId)) return webtoon?.pages(chapterId).orEmpty()
+        if (isKakaMangaId(chapterId)) return kakaManga?.pages(chapterId).orEmpty()
+        if (isMangaParkId(chapterId)) return mangaPark?.pages(chapterId).orEmpty()
         return comix?.pages(chapterId).orEmpty()
     }
 

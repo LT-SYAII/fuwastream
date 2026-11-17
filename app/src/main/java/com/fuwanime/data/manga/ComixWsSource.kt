@@ -217,13 +217,20 @@ class ComixWsSource(
         var page = 1
         var lastPage = 1
         do {
-            val result = runtime.call(
-                "chapters",
-                mapOf(
-                    "hid" to hid,
-                    "options" to mapOf("limit" to CHAPTER_LIMIT, "page" to page, "order" to mapOf("number" to "desc")),
-                ),
-            ).map()
+            val result = try {
+                runtime.call(
+                    "chapters",
+                    mapOf(
+                        "hid" to hid,
+                        "options" to mapOf("limit" to CHAPTER_LIMIT, "page" to page, "order" to mapOf("number" to "desc")),
+                    ),
+                ).map()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A transient/runtime failure on a later page must not discard chapters already loaded.
+                if (all.isEmpty()) throw e else break
+            }
             val items = result["items"].list().ifEmpty { result["s3"].list() }.ifEmpty { result["I7"].list() }.ifEmpty { result["EY"].list() }
             all += items.map { comixChapter(it, hid) }.filter { it.language == "en" || it.language.isBlank() }
             val meta = result["meta"].map().ifEmpty { result["om"].map() }.ifEmpty { result["aY"].map() }.ifEmpty { result["\$U"].map() }
