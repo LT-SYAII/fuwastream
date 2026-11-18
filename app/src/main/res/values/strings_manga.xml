@@ -1,8 +1,8 @@
 <resources>
     <string name="manga_error_not_found">Manga tidak ditemukan.</string>
-    <string name="manga_source_catalog_down">Comix tidak dapat diakses dari jaringan ini. Sumber Indonesia tetap tersedia.</string>
+    <string name="manga_source_catalog_down">Sumber manga Inggris sedang tidak dapat diakses. Sumber Indonesia tetap tersedia.</string>
     <string name="manga_source_catalog_retry">Coba lagi</string>
-    <string name="manga_source_catalog_filter">Filter genre dan status membutuhkan Comix. Hapus filter atau gunakan pencarian.</string>
+    <string name="manga_source_catalog_filter">Filter ini mungkin tidak tersedia. Coba hapus filter atau gunakan pencarian.</string>
     <string name="manga_status_ongoing">Berjalan</string>
     <string name="manga_status_completed">Tamat</string>
     <string name="manga_status_hiatus">Hiatus</string>
@@ -63,7 +63,7 @@
     <string name="manga_reader_source_shinigami">Sumber: Shinigami</string>
     <string name="manga_home_komiku">Klasik &amp; tamat lengkap</string>
     <string name="manga_settings_mature">Konten dewasa</string>
-    <string name="manga_settings_mature_desc">Tampilkan anime ber-genre dewasa (Ecchi, Erotica, Hentai) dan manga bertema dewasa dari Comix</string>
+    <string name="manga_settings_mature_desc">Tampilkan anime ber-genre dewasa (Ecchi, Erotica, Hentai) dan manga bertema dewasa</string>
     <string name="manga_credit_komiku">Data &amp; gambar dari Komiku</string>
     <string name="manga_reader_source_komiku">Sumber: Komiku</string>
     <string name="manga_credit_comix">Data &amp; gambar dari Comix</string>

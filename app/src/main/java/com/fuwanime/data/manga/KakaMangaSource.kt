@@ -1,67 +1,83 @@
 package com.fuwanime.data.manga
 
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-// KakaManga / MangaKakalot-family English catalogue. Best-effort scraper with mirror fallbacks.
+// MangaKakalot / KakaManga-family English catalogue (kakamanga.com, mangakakalot.gg, etc.),
+// based on audited structure: detail /manga/<slug>, chapters via /api/manga/<slug>/chapters (JSON),
+// reader /manga/<slug>/<chapter-slug> with .container-chapter-reader images.
 const val KK_PREFIX = "kk:"
 
 fun isKakaMangaId(id: String): Boolean = id.startsWith(KK_PREFIX)
 
-private fun String.kkRaw() = removePrefix(KK_PREFIX)
-
 class KakaMangaSource(private val client: OkHttpClient) {
     private val mirrors = listOf(
         "https://www.kakamanga.com",
-        "https://www.natomanga.com",
         "https://www.mangakakalot.gg",
+        "https://www.natomanga.com",
         "https://www.nelomanga.com",
-        "https://www.manganato.gg",
     )
+    private val moshi = com.squareup.moshi.Moshi.Builder().build()
+    private val mapAdapter = moshi.adapter(Map::class.java)
 
-    private suspend fun get(url: String): String? = withContext(Dispatchers.IO) {
+    private fun slugOf(id: String) = id.removePrefix(KK_PREFIX).substringBefore('|').substringBefore('?')
+    private fun idFor(slug: String, base: String? = null) = if (base != null) "$KK_PREFIX$slug|$base" else "$KK_PREFIX$slug"
+
+    private suspend fun get(url: String, referer: String? = null): String? = withContext(Dispatchers.IO) {
         runCatching {
             val req = Request.Builder().url(url)
                 .header("User-Agent", UA)
-                .header("Referer", mirrors.first())
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .apply { if (referer != null) header("Referer", referer) }
                 .build()
             client.newCall(req).execute().use { res ->
                 if (!res.isSuccessful) null else res.body?.string()
             }
-        }.getOrNull()?.takeIf { "Just a moment" !in it && it.length > 500 }
-    }
-
-    private suspend fun getAny(pathBuilder: (String) -> String): Pair<String, String>? {
-        for (base in mirrors) {
-            val html = get(pathBuilder(base))
-            if (html != null) return base to html
-        }
-        return null
+        }.getOrNull()?.takeIf { it.length > 300 && "Just a moment" !in it }
     }
 
     suspend fun search(query: String): List<Manga> {
-        val q = query.trim().replace(Regex("\\s+"), "_")
-        val enc = java.net.URLEncoder.encode(query.trim(), "UTF-8")
-        val candidates = listOf<(String) -> String>(
-            { "$it/search/story/$q" },
-            { "$it/search/story/${q.lowercase()}" },
-            { "$it/search/story/${enc.replace("+", "_")}" },
-            { "$it/?s=$enc" },
+        val q = query.trim()
+        if (q.isBlank()) return emptyList()
+        val slugQ = q.lowercase(Locale.ENGLISH).replace(Regex("[^a-z0-9]+"), "_").trim('_')
+        val enc = URLEncoder.encode(q, "UTF-8")
+        val paths = listOf(
+            "/search/story/$slugQ",
+            "/search/story/${q.lowercase(Locale.ENGLISH).replace(Regex("\\s+"), "_")}",
+            "/search/story/${enc.replace("+", "_")}",
         )
-        for (build in candidates) {
+        for (path in paths.distinct()) {
             for (base in mirrors) {
-                val html = get(build(base)) ?: continue
-                val items = parseList(html, base)
+                val html = get("$base$path", "$base/") ?: continue
+                val items = parseSearch(html, base)
                 if (items.isNotEmpty()) return items
             }
         }
-        return emptyList()
+        // fallback: try to resolve directly by slugified title (works even if search blocked)
+        val direct = directBySlug(q)
+        return if (direct != null) listOf(direct) else emptyList()
+    }
+
+    private suspend fun directBySlug(query: String): Manga? {
+        val slug = slugify(query)
+        if (slug.isBlank()) return null
+        return runCatching { detail(idFor(slug)) }.getOrNull()?.takeIf { it.title.isNotBlank() }
+    }
+
+    suspend fun browse(page: Int = 1): MangaPage {
+        for (base in mirrors) {
+            val html = get("$base/manga-list/latest-manga?page=$page", "$base/")
+                ?: get("$base/manga-list/hot-manga?page=$page", "$base/") ?: continue
+            val items = parseList(html, base)
+            if (items.isNotEmpty()) return MangaPage(items, items.size, 0)
+        }
+        return MangaPage(emptyList(), 0, 0)
     }
 
     suspend fun find(names: List<String>): Manga? {
@@ -70,15 +86,19 @@ class KakaMangaSource(private val client: OkHttpClient) {
                 ?.firstOrNull { sameTitle(name, it.title, it.altTitles) }
             if (hit != null) return hit
         }
+        for (name in names.filter { it.isNotBlank() }.distinct().take(2)) {
+            val hit = runCatching { directBySlug(name) }.getOrNull()
+            if (hit != null) return hit
+        }
         return null
     }
 
     suspend fun detail(id: String): Manga {
-        val slug = id.kkRaw().substringBefore('|')
-        val hintBase = id.kkRaw().substringAfter('|', "")
-        val bases = (if (hintBase.isNotBlank()) listOf(hintBase) else emptyList()) + mirrors
+        val slug = slugOf(id)
+        val hintBase = id.removePrefix(KK_PREFIX).substringAfter('|', "").substringBefore('|').takeIf { it.startsWith("http") }
+        val bases = (if (hintBase != null) listOf(hintBase) else emptyList()) + mirrors
         for (base in bases.distinct()) {
-            val html = get("$base/manga/$slug") ?: continue
+            val html = get("$base/manga/$slug", "$base/") ?: continue
             val m = parseDetail(html, slug, base)
             if (m.title.isNotBlank()) return m
         }
@@ -86,82 +106,103 @@ class KakaMangaSource(private val client: OkHttpClient) {
     }
 
     suspend fun chapters(id: String): List<MangaChapter> {
-        val slug = id.kkRaw().substringBefore('|')
-        val hintBase = id.kkRaw().substringAfter('|', "")
-        val bases = (if (hintBase.isNotBlank()) listOf(hintBase) else emptyList()) + mirrors
+        val slug = slugOf(id)
+        val hintBase = id.removePrefix(KK_PREFIX).substringAfter('|', "").substringBefore('|').takeIf { it.startsWith("http") }
+        val bases = (if (hintBase != null) listOf(hintBase) else emptyList()) + mirrors
         for (base in bases.distinct()) {
-            val html = get("$base/manga/$slug") ?: continue
-            val ch = parseChapters(html, slug, base)
+            // Preferred: real chapters API
+            val api = get("$base/api/manga/$slug/chapters", "$base/manga/$slug")
+            if (api != null) {
+                val ch = parseChaptersApi(api, slug, base)
+                if (ch.isNotEmpty()) return pickChapters(ch, "en")
+            }
+            // Fallback: parse chapter rows from detail HTML
+            val html = get("$base/manga/$slug", "$base/") ?: continue
+            val ch = parseChaptersHtml(html, slug, base)
             if (ch.isNotEmpty()) return pickChapters(ch, "en")
         }
         return emptyList()
     }
 
     suspend fun pages(chapterId: String): List<String> {
-        // chapterId: kk:<mangaSlug>|<base>|<chapterPathOrUrl>
-        val raw = chapterId.kkRaw()
-        val parts = raw.split('|', limit = 3)
+        val raw = chapterId.removePrefix(KK_PREFIX)
+        val parts = raw.split('|')
+        // formats: slug|base|chapterSlug  OR slug|chapterSlug  OR slug|/manga/...
         val slug = parts.getOrNull(0).orEmpty()
-        val hintBase = parts.getOrNull(1).orEmpty()
-        val chap = parts.getOrNull(2).orEmpty()
-        val candidates = mutableListOf<String>()
-        if (chap.startsWith("http")) candidates += chap
-        else {
-            val bases = (if (hintBase.isNotBlank()) listOf(hintBase) else emptyList()) + mirrors
-            for (base in bases.distinct()) {
-                if (chap.startsWith("/")) candidates += "$base$chap" else candidates += "$base/manga/$slug/$chap"
+        var baseHint: String? = null
+        var chap: String? = null
+        when {
+            parts.size >= 3 -> { baseHint = parts[1].takeIf { it.startsWith("http") }; chap = parts[2] }
+            parts.size == 2 -> {
+                val p1 = parts[1]
+                if (p1.startsWith("http")) chap = null else if (p1.startsWith("/")) chap = p1 else { baseHint = null; chap = p1 }
             }
         }
+        val candidates = mutableListOf<String>()
+        if (chap != null) {
+            if (chap.startsWith("http")) candidates += chap
+            else {
+                val bases = (if (baseHint != null) listOf(baseHint) else emptyList()) + mirrors
+                for (b in bases.distinct()) {
+                    candidates += if (chap.startsWith("/")) "$b$chap" else "$b/manga/$slug/$chap"
+                }
+            }
+        } else {
+            for (b in (if (baseHint != null) listOf(baseHint) else mirrors)) candidates += "$b/manga/$slug"
+        }
         for (url in candidates.distinct()) {
-            val html = get(url) ?: continue
+            val ref = runCatching {
+                val u = java.net.URI(url)
+                "${u.scheme}://${u.host}/"
+            }.getOrDefault(mirrors.first())
+            val html = get(url, ref) ?: continue
             val imgs = parsePages(html)
             if (imgs.isNotEmpty()) return imgs
         }
         return emptyList()
     }
 
+    internal fun parseSearch(html: String, base: String): List<Manga> = parseList(html, base)
+
     internal fun parseList(html: String, base: String): List<Manga> {
         val out = LinkedHashMap<String, Manga>()
-        // story_item / search-story-item / list-truyen-item patterns
-        val itemRe = Regex("""(?s)<(?:div|li)[^>]*class="[^"]*(?:story_item|search-story-item|list-truyen-item|item)[^"]*"[^>]*>.*?</(?:div|li)>""")
-        val linkRe = Regex("""href="([^"]*/manga/([^"/?#]+)[^"]*)"""")
+        val itemRe = Regex("""(?s)<(?:div|li)[^>]*class="[^"]*(?:story_item|search-story-item|list-truyen-item)[^"]*"[^>]*>(.*?)</(?:div|li)>""")
+        val linkRe = Regex("""href="[^"]*/manga/([^"/?#]+)[^"]*"""")
         val imgRe = Regex("""<img[^>]+(?:src|data-src)="([^"]+)"""")
-        val titleRe = Regex("""title="([^"]+)"""")
-        val h3Re = Regex("""<h3[^>]*>.*?<a[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL)
+        val titleRe = Regex("""<h3[^>]*>.*?<a[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL)
+        val titleAttr = Regex("""title="([^"]+)"""")
         for (m in itemRe.findAll(html)) {
-            val block = m.value
-            val lm = linkRe.find(block) ?: continue
-            val slug = lm.groupValues[2]
+            val block = m.groupValues[1]
+            val slug = linkRe.find(block)?.groupValues?.getOrNull(1) ?: continue
+            if (slug in setOf("list", "search", "genre", "latest", "hot")) continue
             val img = imgRe.find(block)?.groupValues?.getOrNull(1)?.let { absUrl(it, base) }
-            val title = titleRe.find(lm.value)?.groupValues?.getOrNull(1)?.takeIf { it.isNotBlank() }
-                ?: h3Re.find(block)?.groupValues?.getOrNull(1)?.let(::htmlText)
+            val title = titleRe.find(block)?.groupValues?.getOrNull(1)?.let(::htmlText)?.trim()?.ifBlank { null }
+                ?: titleAttr.find(block)?.groupValues?.getOrNull(1)?.let(::htmlText)?.trim()?.ifBlank { null }
                 ?: continue
-            val id = "$KK_PREFIX$slug|$base"
-            if (id !in out) out[id] = Manga(id, title, img, "", emptyList(), MangaStatus.UNKNOWN, null, null, type = "Manga")
+            if (slug !in out) out[slug] = Manga(idFor(slug, base), title, img, "", emptyList(), MangaStatus.UNKNOWN, null, null, type = "Manga")
         }
-        // fallback: generic manga links
         if (out.isEmpty()) {
-            val generic = Regex("""<a[^>]+href="([^"]*/manga/([^"/?#]+))"[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL)
+            val generic = Regex("""<a[^>]+href="[^"]*/manga/([^"/?#]+)"[^>]*title="([^"]+)"[^>]*>""")
             for (m in generic.findAll(html)) {
-                val slug = m.groupValues[2]
+                val slug = m.groupValues[1]
                 if (slug in setOf("list", "search", "genre", "latest", "hot")) continue
-                val title = htmlText(m.groupValues[3]).trim().ifBlank { null } ?: continue
-                val id = "$KK_PREFIX$slug|$base"
-                if (id !in out) out[id] = Manga(id, title, null, "", emptyList(), MangaStatus.UNKNOWN, null, null, type = "Manga")
+                val title = htmlText(m.groupValues[2]).trim()
+                if (slug !in out && title.isNotBlank()) out[slug] = Manga(idFor(slug, base), title, null, "", emptyList(), MangaStatus.UNKNOWN, null, null, type = "Manga")
             }
         }
         return out.values.toList()
     }
 
     internal fun parseDetail(html: String, slug: String, base: String): Manga {
-        val title = Regex("""<h1[^>]*>(.*?)</h1>""", RegexOption.DOT_MATCHES_ALL).find(html)?.groupValues?.getOrNull(1)?.let(::htmlText)?.trim()
-            ?: Regex("""property="og:title"\s+content="([^"]+)"""").find(html)?.groupValues?.getOrNull(1)?.substringBefore(" |")?.substringBefore(" -")?.trim()
+        val title = Regex("""<h1[^>]*>(.*?)</h1>""", RegexOption.DOT_MATCHES_ALL).find(html)?.groupValues?.getOrNull(1)?.let(::htmlText)?.trim()?.ifBlank { null }
+            ?: Regex("""property="og:title"\s+content="([^"]+)"""").find(html)?.groupValues?.getOrNull(1)
+                ?.substringBefore(" |")?.substringBefore(" - Manga")?.let(::htmlText)?.trim()?.ifBlank { null }
             ?: slug.replace('-', ' ')
-        val cover = Regex("""<span[^>]*class="[^"]*info-image[^"]*"[^>]*>.*?<img[^>]+(?:src|data-src)="([^"]+)"""", RegexOption.DOT_MATCHES_ALL).find(html)?.groupValues?.getOrNull(1)
-            ?: Regex("""<div[^>]*class="[^"]*manga-info-pic[^"]*"[^>]*>.*?<img[^>]+(?:src|data-src)="([^"]+)"""", RegexOption.DOT_MATCHES_ALL).find(html)?.groupValues?.getOrNull(1)
+        val cover = Regex("""<div[^>]*class="[^"]*manga-info-pic[^"]*"[^>]*>.*?<img[^>]+(?:src|data-src)="([^"]+)"""", RegexOption.DOT_MATCHES_ALL).find(html)?.groupValues?.getOrNull(1)
+            ?: Regex("""class="[^"]*info-image[^"]*"[^>]*>.*?<img[^>]+(?:src|data-src)="([^"]+)"""", RegexOption.DOT_MATCHES_ALL).find(html)?.groupValues?.getOrNull(1)
             ?: Regex("""property="og:image"\s+content="([^"]+)"""").find(html)?.groupValues?.getOrNull(1)
-        val desc = Regex("""<div[^>]*id="(?:noidungm|panel-story-info-description|contentBox)"[^>]*>(.*?)</div>""", RegexOption.DOT_MATCHES_ALL).find(html)?.groupValues?.getOrNull(1)?.let(::htmlText)?.trim()
-            ?: Regex("""property="og:description"\s+content="([^"]+)"""").find(html)?.groupValues?.getOrNull(1)?.let(::htmlText).orEmpty()
+        val desc = Regex("""<div[^>]*id="(?:noidungm|panel-story-info-description|contentBox)"[^>]*>(.*?)</div>""", RegexOption.DOT_MATCHES_ALL).find(html)?.groupValues?.getOrNull(1)?.let(::htmlText)?.trim().orEmpty()
+            .ifBlank { Regex("""property="og:description"\s+content="([^"]+)"""").find(html)?.groupValues?.getOrNull(1)?.let(::htmlText)?.trim().orEmpty() }
         val infoBlock = Regex("""<ul[^>]*class="[^"]*manga-info-text[^"]*"[^>]*>(.*?)</ul>""", RegexOption.DOT_MATCHES_ALL).find(html)?.value ?: html
         val statusText = Regex("""Status\s*:?\s*</[^>]+>\s*([^<]+)""", RegexOption.IGNORE_CASE).find(infoBlock)?.groupValues?.getOrNull(1)?.trim()
             ?: Regex("""Status\s*:?\s*([^<\n]+)""", RegexOption.IGNORE_CASE).find(infoBlock)?.groupValues?.getOrNull(1)?.trim().orEmpty()
@@ -172,15 +213,13 @@ class KakaMangaSource(private val client: OkHttpClient) {
             else -> MangaStatus.UNKNOWN
         }
         val authors = Regex("""Author[^<]*</[^>]+>(.*?)</li>""", RegexOption.DOT_MATCHES_ALL).find(infoBlock)?.groupValues?.getOrNull(1)
-            ?.let { Regex("""<a[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL).findAll(it).map { m -> htmlText(m.groupValues[1]).trim() }.filter { it.isNotBlank() }.toList() }
-            .orEmpty()
+            ?.let { Regex("""<a[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL).findAll(it).map { m -> htmlText(m.groupValues[1]).trim() }.filter { it.isNotBlank() }.toList() }.orEmpty()
         val genres = Regex("""Genres?[^<]*</[^>]+>(.*?)</li>""", RegexOption.DOT_MATCHES_ALL).find(infoBlock)?.groupValues?.getOrNull(1)
-            ?.let { Regex("""<a[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL).findAll(it).map { m -> htmlText(m.groupValues[1]).trim() }.filter { it.isNotBlank() }.toList() }
-            .orEmpty()
+            ?.let { Regex("""<a[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL).findAll(it).map { m -> htmlText(m.groupValues[1]).trim() }.filter { it.isNotBlank() }.toList() }.orEmpty()
         val alts = Regex("""Alternative[^<]*</[^>]+>\s*([^<]+)""", RegexOption.IGNORE_CASE).find(infoBlock)?.groupValues?.getOrNull(1)
             ?.split(';', ',', '/')?.map { it.trim() }?.filter { it.isNotBlank() }.orEmpty()
         return Manga(
-            id = "$KK_PREFIX$slug|$base",
+            id = idFor(slug, base),
             title = title,
             coverUrl = cover?.let { absUrl(it, base) },
             description = desc,
@@ -193,36 +232,36 @@ class KakaMangaSource(private val client: OkHttpClient) {
         )
     }
 
-    internal fun parseChapters(html: String, slug: String, base: String): List<MangaChapter> {
-        val out = mutableListOf<MangaChapter>()
-        // common: div.chapter-list div.row  OR ul.row-content-chapter li
-        val rowRe = Regex("""(?s)<(?:li|div)[^>]*class="[^"]*(?:a-h|row)[^"]*"[^>]*>.*?</(?:li|div)>""")
-        val rows = rowRe.findAll(html).toList().ifEmpty {
-            Regex("""(?s)<li[^>]*>.*?href="[^"]*(?:/chapter|/chap)[^"]*".*?</li>""").findAll(html).toList()
-        }
-        val linkRe = Regex("""href="([^"]+/(?:chapter|chap)[^"]*)"[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL)
-        val timeRe = Regex("""<span[^>]*(?:class="[^"]*chapter-time[^"]*"|title="([^"]+)")[^>]*>(.*?)</span>""", RegexOption.DOT_MATCHES_ALL)
-        val numRe = Regex("""(?:chapter|chap)[\s._-]*([0-9]+(?:\.[0-9]+)?)""", RegexOption.IGNORE_CASE)
-        for (row in rows) {
-            val block = row.value
-            val lm = linkRe.find(block) ?: continue
-            val href = lm.groupValues[1]
-            val chapPath = when {
-                href.startsWith("http") -> href
-                href.startsWith("/") -> href
-                else -> "/$href"
-            }
-            val chSlug = chapPath.substringAfterLast('/')
-            val label = htmlText(lm.groupValues[2]).trim()
-            val number = numRe.find(chSlug)?.groupValues?.getOrNull(1) ?: numRe.find(label)?.groupValues?.getOrNull(1)
-            val timeRaw = timeRe.find(block)?.let { it.groupValues[1].ifBlank { htmlText(it.groupValues[2]) } }.orEmpty()
-            val publishAt = parseRelativeOrDate(timeRaw)
+    @Suppress("UNCHECKED_CAST")
+    internal fun parseChaptersApi(json: String, slug: String, base: String): List<MangaChapter> {
+        val root = runCatching { mapAdapter.fromJson(json) as? Map<String, Any?> }.getOrNull() ?: return emptyList()
+        if (root["success"] != true) return emptyList()
+        val data = root["data"] as? Map<String, Any?> ?: return emptyList()
+        val chapters = data["chapters"] as? List<*> ?: return emptyList()
+        val out = ArrayList<MangaChapter>(chapters.size)
+        for (c in chapters) {
+            val m = c as? Map<String, Any?> ?: continue
+            val chSlug = m["chapter_slug"]?.toString()?.trim().orEmpty()
+            val chName = m["chapter_name"]?.toString()?.trim().orEmpty()
+            val numRaw = m["chapter_num"]
+            val number = when (numRaw) {
+                is Number -> {
+                    val d = numRaw.toDouble()
+                    if (d == d.toLong().toDouble()) d.toLong().toString() else d.toString()
+                }
+                is String -> numRaw.trim().ifBlank { null }
+                else -> null
+            } ?: Regex("""([0-9]+(?:\.[0-9]+)?)""").find(chSlug)?.groupValues?.getOrNull(1)
+            val updated = m["updated_at"]?.toString().orEmpty()
+            val publishAt = parseIsoDate(updated)
+            if (chSlug.isBlank()) continue
+            val cleanTitle = chName.replace(Regex("""^Chapter\s*[0-9.]+[:\s-]*""", RegexOption.IGNORE_CASE), "").trim().ifBlank { null }
             out += MangaChapter(
-                id = "$KK_PREFIX$slug|$base|$chapPath",
+                id = "$KK_PREFIX$slug|$base|$chSlug",
                 number = number,
-                title = label.takeIf { it.isNotBlank() && !it.equals("Chapter $number", true) },
+                title = cleanTitle,
                 language = "en",
-                group = "KakaManga",
+                group = "MangaKakalot",
                 pages = 1,
                 externalUrl = null,
                 publishAt = publishAt,
@@ -231,14 +270,38 @@ class KakaMangaSource(private val client: OkHttpClient) {
         return out
     }
 
+    internal fun parseChaptersHtml(html: String, slug: String, base: String): List<MangaChapter> {
+        val out = mutableListOf<MangaChapter>()
+        val rowRe = Regex("""(?s)<(?:li|div)[^>]*class="[^"]*(?:a-h|row|chapter-list)[^"]*"[^>]*>.*?</(?:li|div)>""")
+        val rows = rowRe.findAll(html).toList().ifEmpty {
+            Regex("""(?s)<li[^>]*>.*?href="[^"]*(?:/chapter)[^"]*".*?</li>""").findAll(html).toList()
+        }
+        val linkRe = Regex("""href="([^"]+/chapter-[^"]*)"[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL)
+        val numRe = Regex("""chapter[ -]*([0-9]+(?:\.[0-9]+)?)""", RegexOption.IGNORE_CASE)
+        for (row in rows) {
+            val lm = linkRe.find(row.value) ?: continue
+            val href = lm.groupValues[1].trim()
+            val chSlug = href.substringAfterLast('/').substringBefore('?')
+            val label = htmlText(lm.groupValues[2]).trim()
+            val number = numRe.find(chSlug)?.groupValues?.getOrNull(1) ?: numRe.find(label)?.groupValues?.getOrNull(1)
+            val time = Regex("""title="([^"]+)"""").find(row.value)?.groupValues?.getOrNull(1).orEmpty()
+            val publishAt = parseIsoDate(time).takeIf { it > 0 } ?: parseRelative(time)
+            out += MangaChapter("$KK_PREFIX$slug|$base|$chSlug", number, label.ifBlank { null }, "en", "MangaKakalot", 1, null, publishAt)
+        }
+        return out.distinctBy { it.id }
+    }
+
     internal fun parsePages(html: String): List<String> {
-        val container = Regex("""(?s)<div[^>]*class="[^"]*container-chapter-reader[^"]*"[^>]*>(.*?)</div>\s*(?:<div|<footer|$)""").find(html)?.groupValues?.getOrNull(1)
+        val section = Regex("""(?s)<div[^>]*class="[^"]*container-chapter-reader[^"]*"[^>]*>(.*?)</div>\s*(?:<div class="chapter|<div style="text-align|<footer|$)""").find(html)?.groupValues?.getOrNull(1)
             ?: html
         val imgRe = Regex("""<img[^>]+(?:src|data-src)="([^"]+)"""")
-        return imgRe.findAll(container).map { absUrl(it.groupValues[1], mirrors.first()) }
-            .filter { u -> u.contains("2xstorage") || u.contains("img") || u.contains("chapter") || u.contains("/kk/") || Regex("""\.(jpg|jpeg|png|webp)""", RegexOption.IGNORE_CASE).containsMatchIn(u) }
-            .filterNot { "logo" in it || "avatar" in it || "icon" in it }
+        val imgs = imgRe.findAll(section).map { it.groupValues[1].trim() }
+            .filter { it.isNotBlank() }
+            .map { absUrl(it, mirrors.first()) }
+            .filter { u -> Regex("""\.(jpg|jpeg|png|webp)(\?|$)""", RegexOption.IGNORE_CASE).containsMatchIn(u) || "/2xstorage" in u || "storage.com" in u }
+            .filterNot { "logo" in it || "avatar" in it || "icon" in it || "/thumb/" in it }
             .distinct().toList()
+        return imgs
     }
 
     private fun absUrl(url: String, base: String): String = when {
@@ -248,32 +311,42 @@ class KakaMangaSource(private val client: OkHttpClient) {
         else -> base.trimEnd('/') + "/" + url
     }
 
-    private fun parseRelativeOrDate(raw: String): Long {
-        val s = raw.trim().lowercase()
-        val now = System.currentTimeMillis()
-        val rel = Regex("""(\d+)\s*(minute|hour|day|week|month|year)""").find(s)
-        if (rel != null) {
-            val n = rel.groupValues[1].toLongOrNull() ?: 0L
-            val ms = when (rel.groupValues[2]) {
-                "minute" -> 60_000L
-                "hour" -> 3_600_000L
-                "day" -> 86_400_000L
-                "week" -> 7L * 86_400_000L
-                "month" -> 30L * 86_400_000L
-                "year" -> 365L * 86_400_000L
-                else -> 0L
+    private fun slugify(name: String): String = name.lowercase(Locale.ENGLISH)
+        .replace(Regex("[^a-z0-9]+"), "-").trim('-')
+
+    private fun parseIsoDate(raw: String): Long {
+        val s = raw.trim()
+        if (s.isBlank()) return 0L
+        // 2025-10-26T06:14:51.000000Z or 2025-10-26
+        return try {
+            val clean = s.replace(" ", "T")
+            val fmt = when {
+                clean.contains('.') -> SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'", Locale.ENGLISH)
+                clean.contains('T') && clean.endsWith("Z") -> SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ENGLISH)
+                clean.contains('T') -> SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.ENGLISH)
+                else -> SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
             }
-            return now - n * ms
+            fmt.timeZone = TimeZone.getTimeZone("UTC")
+            fmt.parse(clean.take(fmt.toPattern().replace("'", "").length.coerceAtLeast(clean.length)).let { clean })?.time ?: 0L
+        } catch (_: Exception) {
+            // retry with simpler parse
+            try { SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.ENGLISH).apply { timeZone = TimeZone.getTimeZone("UTC") }.parse(s.take(19))?.time ?: 0L } catch (_: Exception) { 0L }
         }
-        val fmts = listOf("MMM dd,yyyy HH:mm", "MMM dd,yyyy", "MMM dd, yy", "dd/MM/yyyy", "yyyy-MM-dd")
-        for (f in fmts) {
-            try {
-                val df = SimpleDateFormat(f, Locale.ENGLISH).apply { timeZone = TimeZone.getTimeZone("UTC") }
-                val t = df.parse(raw.trim())?.time
-                if (t != null) return t
-            } catch (_: Exception) {}
+    }
+
+    private fun parseRelative(raw: String): Long {
+        val s = raw.trim().lowercase(Locale.ENGLISH)
+        val n = Regex("""(\d+)""").find(s)?.groupValues?.getOrNull(1)?.toLongOrNull() ?: return 0L
+        val ms = when {
+            "minute" in s -> 60_000L
+            "hour" in s -> 3_600_000L
+            "day" in s -> 86_400_000L
+            "week" in s -> 7L * 86_400_000L
+            "month" in s -> 30L * 86_400_000L
+            "year" in s -> 365L * 86_400_000L
+            else -> return 0L
         }
-        return 0L
+        return System.currentTimeMillis() - n * ms
     }
 
     private companion object {
